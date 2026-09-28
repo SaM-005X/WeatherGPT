@@ -1,0 +1,68 @@
+service: weather-gpt-backend
+
+frameworkVersion: '^3 || ^4'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  architecture: arm64
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 10
+  logRetentionInDays: 7
+  httpApi:
+    cors:
+      allowedOrigins:
+        - 'http://localhost:3000'
+        - 'https://${self:custom.domainName, "localhost"}'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - OPTIONS
+  environment:
+    STAGE: ${self:provider.stage}
+    NODE_ENV: production
+    SUPABASE_URL: ${ssm:/weather-gpt/${self:provider.stage}/SUPABASE_URL, ''}
+    SUPABASE_ANON_KEY: ${ssm:/weather-gpt/${self:provider.stage}/SUPABASE_ANON_KEY, ''}
+    SUPABASE_SERVICE_ROLE_KEY: ${ssm:/weather-gpt/${self:provider.stage}/SUPABASE_SERVICE_ROLE_KEY, ''}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource: 'arn:aws:ssm:*:*:parameter/weather-gpt/*'
+
+custom:
+  domainName: weather.yourdomain.com
+
+functions:
+  graphqlHandler:
+    handler: dist/handlers/graphql.handler
+    description: "Executes GraphQL queries and mutations via HTTP API Gateway v2"
+    events:
+      - httpApi:
+          path: /graphql
+          method: post
+      - httpApi:
+          path: /graphql
+          method: get
+      - httpApi:
+          path: /graphql
+          method: options
+
+  forecastSyncWorker:
+    handler: dist/handlers/sync.handler
+    description: "Periodically warms forecasts for active/saved locations via EventBridge"
+    timeout: 30
+    memorySize: 256
+    events:
+      - schedule:
+          rate: rate(30 minutes)
+          enabled: true
+          description: "Periodically warm hourly and 7-day forecasts in Supabase"

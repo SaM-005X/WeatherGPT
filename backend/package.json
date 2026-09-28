@@ -1,0 +1,19 @@
+{
+  "name": "weather-gpt-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WeatherGPT AWS Serverless Backend",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "graphql": "^17.0.2",
+    "graphql-yoga": "^5.24.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^20.17.19",
+    "typescript": "^5.7.3"
+  }
+}

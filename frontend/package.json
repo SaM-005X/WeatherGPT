@@ -1,0 +1,42 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "tsx src/tests/weatherService.test.ts && tsx src/tests/geocodingService.test.ts && tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts && tsx --env-file=.env.local src/tests/phase41Verification.test.ts && tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts && tsx --env-file=.env.local src/tests/graphql.test.ts && tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts && tsx --env-file=.env.local src/tests/weatherFreshness.test.ts && tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts",
+    "test:geo": "tsx src/tests/geocodingService.test.ts",
+    "test:db": "tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts",
+    "test:p41": "tsx --env-file=.env.local src/tests/phase41Verification.test.ts",
+    "test:cleanup": "tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts",
+    "test:gql": "tsx --env-file=.env.local src/tests/graphql.test.ts",
+    "test:lambda": "tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts",
+    "test:freshness": "tsx --env-file=.env.local src/tests/weatherFreshness.test.ts",
+    "test:freshness-bug": "tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.1",
+    "@types/leaflet": "^1.9.22",
+    "graphql": "^17.0.2",
+    "graphql-yoga": "^5.24.1",
+    "leaflet": "^1.9.4",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/aws-lambda": "^8.10.163",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}

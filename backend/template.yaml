@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: WeatherGPT Serverless Backend (API Gateway v2, Lambda, EventBridge, CloudWatch)
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 512
+    Runtime: nodejs20.x
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        NODE_ENV: production
+        SUPABASE_URL: !Ref SupabaseUrl
+        SUPABASE_ANON_KEY: !Ref SupabaseAnonKey
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    Description: Deployment stage (dev, staging, prod)
+  SupabaseUrl:
+    Type: String
+    Default: ''
+    Description: Supabase Project URL
+  SupabaseAnonKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Supabase Anon Key
+
+Resources:
+  WeatherHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins:
+          - 'http://localhost:3000'
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+  GraphQLFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: dist/handlers/graphql.handler
+      Description: WeatherGPT GraphQL API Gateway Lambda Handler
+      Events:
+        GraphQLPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WeatherHttpApi
+            Path: /graphql
+            Method: post
+        GraphQLGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WeatherHttpApi
+            Path: /graphql
+            Method: get
+        GraphQLOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WeatherHttpApi
+            Path: /graphql
+            Method: options
+
+  ForecastSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: dist/handlers/sync.handler
+      Description: EventBridge-triggered background forecast warming worker
+      Timeout: 30
+      MemorySize: 256
+      Events:
+        HalfHourlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Description: Trigger forecast sync worker every 30 minutes
+            Enabled: true
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API Gateway endpoint URL for GraphQL
+    Value: !Sub 'https://${WeatherHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/graphql'
