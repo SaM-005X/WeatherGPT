@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx src/tests/weatherService.test.ts && tsx src/tests/geocodingService.test.ts && tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts && tsx --env-file=.env.local src/tests/phase41Verification.test.ts && tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts && tsx --env-file=.env.local src/tests/graphql.test.ts && tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts && tsx --env-file=.env.local src/tests/weatherFreshness.test.ts && tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts",
+    "test": "tsx src/tests/weatherService.test.ts && tsx src/tests/geocodingService.test.ts && tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts && tsx --env-file=.env.local src/tests/phase41Verification.test.ts && tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts && tsx --env-file=.env.local src/tests/graphql.test.ts && tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts && tsx --env-file=.env.local src/tests/weatherFreshness.test.ts && tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts && tsx src/tests/inFlightAbortRegression.test.ts",
     "test:geo": "tsx src/tests/geocodingService.test.ts",
     "test:db": "tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts",
     "test:p41": "tsx --env-file=.env.local src/tests/phase41Verification.test.ts",
@@ -15,7 +15,8 @@
     "test:gql": "tsx --env-file=.env.local src/tests/graphql.test.ts",
     "test:lambda": "tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts",
     "test:freshness": "tsx --env-file=.env.local src/tests/weatherFreshness.test.ts",
-    "test:freshness-bug": "tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts"
+    "test:freshness-bug": "tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts",
+    "test:perf": "tsx src/tests/inFlightAbortRegression.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",

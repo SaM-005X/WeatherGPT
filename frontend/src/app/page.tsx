@@ -73,7 +73,7 @@ export default function WeatherDashboardPage() {
           setLastRefreshedAt(now);
         }
       } catch (err: unknown) {
-        if (isCancelled || (err instanceof DOMException && err.name === 'AbortError')) {
+        if (isCancelled) {
           return;
         }
         const message = err instanceof Error ? err.message : 'Unable to retrieve weather data.';
@@ -173,7 +173,7 @@ export default function WeatherDashboardPage() {
   // 7. Coordinate synchronization check: detects in-flight location change immediately on render
   const activeCoordsId = `coords-${activeLocation.latitude.toFixed(4)}-${activeLocation.longitude.toFixed(4)}`;
   const isWeatherStale = weatherData !== null && weatherData.locationId !== activeCoordsId;
-  const isWeatherLoadingEffective = isWeatherLoading || isWeatherStale;
+  const isWeatherLoadingEffective = isWeatherLoading || (isWeatherStale && !weatherError);
 
   return (
     <div className="flex-1 flex flex-col bg-slate-50 text-slate-900">

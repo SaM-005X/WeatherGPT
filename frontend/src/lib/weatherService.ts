@@ -423,23 +423,27 @@ function attachAbortSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promis
 
 /**
  * Low-level network fetch to Open-Meteo REST API.
+ * Uses an independent network timeout (15s) so individual caller cancellations
+ * do not tear down shared in-flight requests.
  */
 async function executeNetworkFetch(
   latitude: number,
-  longitude: number,
-  signal?: AbortSignal
+  longitude: number
 ): Promise<WeatherReport> {
   const url = buildForecastUrl(latitude, longitude);
 
   let response: Response;
   try {
     response = await fetch(url, {
-      signal,
+      signal: AbortSignal.timeout(15000),
       headers: {
         Accept: 'application/json',
       },
     });
   } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error('Weather network request timed out after 15 seconds.');
+    }
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error;
     }
@@ -518,7 +522,7 @@ export async function fetchWeatherData(
   // 3. Initiate Network Fetch wrapped in inFlightRequests registry
   const fetchPromise = (async (): Promise<WeatherReport> => {
     try {
-      const freshData = await executeNetworkFetch(latitude, longitude, options?.signal);
+      const freshData = await executeNetworkFetch(latitude, longitude);
 
       const fetchTime = Date.now();
       const newEntry: WeatherCacheEntry = {
