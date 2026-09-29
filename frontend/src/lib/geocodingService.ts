@@ -190,7 +190,7 @@ export async function searchGeocodingLocations(
   }));
 
   // 2. Asynchronously save results to Supabase cache (fire-and-forget, non-blocking)
-  setCachedGeocoding(trimmed, normalizedResults).catch(() => {});
+  setCachedGeocoding(trimmed, normalizedResults).catch(() => { });
 
   return normalizedResults;
 }
