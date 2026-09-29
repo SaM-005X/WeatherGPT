@@ -241,13 +241,16 @@ export default function WeatherDashboardPage() {
               lastRefreshedAt={lastRefreshedAt || weatherData?.fetchedAt || weatherData?.lastUpdated}
             />
 
-            {/* 3. Weather Map (Synchronized with active location, accuracy, and source) */}
+            {/* 3. Weather Map (Synchronized with active location, accuracy, source, and cloud cover) */}
             <WeatherMap
               latitude={activeLocation.latitude}
               longitude={activeLocation.longitude}
               locationName={activeLocation.name}
               accuracy={activeLocation.accuracy}
               source={activeLocation.source}
+              cloudCover={weatherData?.current?.cloudCover}
+              conditionDescription={weatherData?.current?.conditionDescription}
+              condition={weatherData?.current?.condition}
             />
 
             {/* 4. Today's Forecast (Hourly Scroll, converts °C / °F) */}

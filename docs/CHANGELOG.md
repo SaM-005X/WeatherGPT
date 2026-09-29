@@ -1,9 +1,69 @@
 # Changelog
 
-All notable changes to the Simple Weather Web Application are documented in this file.
+All notable changes to WeatherGPT are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [1.4.0] - 2026-09-29 — Phase 8: Simple Weather & Cloud Map
+
+### Added & Integrated
+- **Core Meteorological Data Enrichment (`weatherService.ts`)**:
+  - Enriched Open-Meteo REST parameters to fetch `cloud_cover` for current observations and `cloud_cover` for 24-hour hourly forecasts.
+  - Extended domain models (`CurrentWeather`, `HourlyForecast`) and GraphQL types with `cloudCover: number` (0–100%).
+  - Added deterministic fallback (0%) when upstream provider omits cloud cover data.
+- **Keyless RainViewer Doppler Radar Service (`rainViewerService.ts`)**:
+  - Integrated RainViewer API v2 (`https://api.rainviewer.com/public/weather-maps.json`) for global precipitation radar overlays requiring zero credentials or API keys.
+  - Implemented 5-minute in-memory caching (`RADAR_CACHE_TTL_MS = 300000`) and in-flight request deduplication to prevent redundant network requests.
+  - Built graceful fallback returning stale timestamp metadata during transient network interruptions.
+  - Clamped radar tile layer `maxNativeZoom: 7` (`L.tileLayer(..., { maxNativeZoom: 7, opacity: 0.65 })`) to avoid HTTP 404 tile errors beyond RainViewer's native radar coverage, while allowing the base map to zoom cleanly up to Leaflet max.
+- **Map UI & Doppler Radar Layer Integration (`WeatherMapInternal.tsx`)**:
+  - Added interactive Radar ON/OFF control with pulsing status indicator.
+  - Built version-tracked tile layer lifecycle (`layerIdRef`) preventing stale or concurrent layer memory leaks during fast toggling or location changes.
+  - Implemented floating Cloud Cover HUD displaying real-time cloud percentage and semantic descriptors (`Clear`, `Partly Cloudy`, `Mostly Cloudy`, `Overcast`).
+  - Applied corrective UI patch positioning the map top bar (`top-2.5 left-14 right-2.5`) with a 12px horizontal buffer from Leaflet zoom controls, eliminating button overlap in both dashboard cards and `/maps`.
+- **Multi-Instance Map Support (`/maps`)**:
+  - Hardened full-page weather radar map at `/maps` with coordinate synchronization, radar toggle, and cloud HUD.
+- **Comprehensive Automated Verification Suites**:
+  - Created `src/tests/rainViewerService.test.ts` (9 tests covering metadata fetching, cache TTL, in-flight deduplication, error handling, stale fallback, tile URL generation, and coordinate bounds).
+  - Created `src/tests/mapUiIntegration.test.ts` (9 tests covering radar toggle lifecycle, layer addition/removal, cloud cover HUD formatting, and zoom control coexistence).
+  - Expanded automated test baseline to **85 / 85 automated tests passing across 12 test suites**.
+  - Verified **0 TypeScript errors**, **0 ESLint errors/warnings**, and successful Next.js production build (`next build` generating 16 routes).
+
+### Milestone Status
+- **Phase 8 Execution**: **COMPLETED**.
+- **Phase 9 Status (Weather Chatbot)**: NEXT FEATURE MILESTONE (LLM integration, server-side weather grounding, and guardrail enforcement). The existing Weather Assistant UI and GraphQL stub are classified as partially implemented preparation.
+- **Deployment Boundaries**: AWS cloud deployment remains deferred / unprovisioned, Docker containerization remains strictly deferred to Phase 10, Cloudflare remains a future deployment target.
+
+---
+
+## [1.3.0] - 2026-09-29 — Phase 7.2: Final Stabilization / Performance & Abort Handling
+
+### Added & Hardened
+- **Caller Cancellation Isolation Engine (`weatherService.ts`)**:
+  - Decoupled individual caller `AbortSignal`s via `attachAbortSignal()` in `weatherService.ts`.
+  - When an individual caller aborts (such as during a React StrictMode unmount, rapid tab switch, or navigation), the underlying wire request to Open-Meteo continues in-flight for concurrent callers without throwing an unhandled `AbortError`.
+  - Concurrent callers receive valid data successfully, and the shared memory cache is populated cleanly for instantaneous subsequent retrieval (< 20ms).
+- **In-Flight Request Deduplication Resilience**:
+  - Safe lifecycle management of the `inFlightRequests` Map registry, ensuring entries are always pruned in a `finally` block upon completion or rejection.
+  - Verified rapid sequential location switching (e.g. Kolkata -> London -> Kolkata) ensuring aborted prior promises do not corrupt subsequent active fetches.
+- **Loading-State Stabilization & Non-Destructive Refresh**:
+  - Enforced strict separation between initial cold load (`!data` showing loading skeletons) and subsequent manual or automatic background refreshes (`isRefreshing` indicator).
+  - Completely eliminated skeleton flashing during manual and auto refreshes across `CurrentWeatherCard`, `HourlyForecastList`, and `DailyForecastList`.
+- **Stale-While-Revalidate Error Fallback**:
+  - If external provider queries fail during non-forced refreshes, the application automatically falls back to cached observation data with `isStale: true` for up to 24 hours (`STALE_FALLBACK_MAX_AGE_MS = 86400000`) rather than destroying rendered UI.
+- **Comprehensive Regression Verification Suites**:
+  - Created `src/tests/freshnessBugInvestigation.test.ts` (8 automated tests validating refresh timestamp advancement, 10-minute cadence, stale state clearing, manual refresh timer synchronization, visibility change handling, and metadata precision).
+  - Created `src/tests/inFlightAbortRegression.test.ts` (3 automated tests validating caller cancellation isolation, post-abort cache population, and rapid sequential location switching).
+  - Expanded automated test baseline to **68 / 68 automated tests passing across 10 test suites**.
+  - Verified **0 TypeScript errors**, **0 ESLint errors/warnings**, and successful Next.js production build (`next build` generating 16 routes).
+
+### Milestone Status
+- **Phase 7.2 Execution**: **COMPLETED**.
+- **Phase 8 Status (Simple Weather & Cloud Map)**: Ready for planning and execution (Next Phase — NOT started).
+- **Deployment Boundary**: AWS cloud deployment remains deferred / unprovisioned, Docker containerization remains strictly deferred to Phase 10, Cloudflare remains a future deployment target.
 
 ---
 
@@ -117,7 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Lifted unit preference state (`units: 'metric' | 'imperial'`, `setUnits`, `toggleUnits`) into the context so °C / °F conversion stays perfectly synchronized across all routes.
   - Added global location search modal controller (`isSearchModalOpen`, `setIsSearchModalOpen`, `openLocationSearch`).
 - **Top Navigation Bar (`src/components/navigation/TopNav.tsx`)**:
-  - Implemented responsive desktop navigation bar with WeatherGPT Pro branding, categorized dropdown menus (Forecasts, Environment, Geohazards), and direct Radar & Maps link.
+  - Implemented responsive desktop navigation bar with WeatherGPT branding, categorized dropdown menus (Forecasts, Environment, Geohazards), and direct Radar & Maps link.
   - Added header-level reversible unit toggle (°C / °F) and active location indicator pill.
   - Implemented mobile navigation drawer and fixed bottom navigation dock for one-handed mobile browsing.
 - **Global Location Search Modal (`src/components/navigation/LocationSearchModal.tsx`)**:

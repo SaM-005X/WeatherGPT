@@ -37,6 +37,7 @@ export interface OpenMeteoCurrent {
   wind_speed_10m: number;
   wind_direction_10m: number;
   uv_index?: number;
+  cloud_cover?: number;
 }
 
 export interface OpenMeteoHourly {
@@ -201,7 +202,7 @@ export function buildForecastUrl(latitude: number, longitude: number): string {
   url.searchParams.set('longitude', longitude.toString());
   url.searchParams.set(
     'current',
-    'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,uv_index'
+    'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,uv_index,cloud_cover'
   );
   url.searchParams.set(
     'hourly',
@@ -273,6 +274,7 @@ export function normalizeCurrentWeather(
     conditionDescription: codeDetails.description,
     precipitation: typeof rawCurrent.precipitation === 'number' ? rawCurrent.precipitation : 0,
     uvIndex: typeof rawCurrent.uv_index === 'number' ? rawCurrent.uv_index : undefined,
+    cloudCover: typeof rawCurrent.cloud_cover === 'number' ? Math.round(rawCurrent.cloud_cover) : undefined,
     recordedAt: calculateObservationIso(rawCurrent.time, utcOffsetSeconds),
     isCached,
   };

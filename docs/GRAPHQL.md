@@ -21,14 +21,16 @@ Open-Meteo REST API          Supabase PostgreSQL (anon key)
 
 ---
 
-## 2. Implementation Status (Phase 5 Completed)
+## 2. Implementation Status
 
-- **Phase 5 GraphQL Foundation**: **COMPLETED**.
-- **Server Implementation**: Built using `graphql-yoga` and standard Web Fetch API in `src/app/api/graphql/route.ts`.
+- **GraphQL Gateway Implementation**: Built using `graphql-yoga` and standard Web Fetch API in `src/app/api/graphql/route.ts`.
 - **Interactive Playground**: GraphiQL interface enabled in development at `http://localhost:3000/api/graphql`.
-- **Dashboard Status**: The active dashboard (`src/app/page.tsx`) continues using the proven direct `fetchWeatherData()` domain service for maximum stability.
-- **GraphQL Adapter**: `src/graphql/client/weatherAdapter.ts` provides a drop-in `fetchWeatherViaGraphQL()` adapter ready for future migration.
+- **Dashboard Status**: The active dashboard (`src/app/page.tsx`) intentionally continues using the proven direct `fetchWeatherData()` domain service for maximum stability.
+- **GraphQL Client Adapter**: `src/graphql/client/weatherAdapter.ts` provides a drop-in `fetchWeatherViaGraphQL()` adapter ready for future migration.
+- **Serverless Lambda Reuse (Phase 6)**: The Lambda GraphQL handler (`backend/src/handlers/graphql.ts`) reuses the same GraphQL schema/resolver implementation and has been verified locally. Actual cloud deployment to AWS remains deferred.
+- **Freshness & Deduplication Integration (Phase 7 & 7.2)**: Weather resolvers automatically benefit from the tiered freshness windows (5m current, 30m hourly, 2h daily, 24h stale fallback), in-flight deduplication, and caller cancellation isolation implemented in `weatherService.ts`.
 - **Unit Representation**: All weather metrics are normalized and returned strictly in **Celsius**. Display conversions (°C / °F) are handled on the client display layer by `temperature.ts` and `LocationContext`.
+- **Weather Assistant Architecture & Stub (Phase 5/8 Preparation)**: The GraphQL schema includes `askWeatherAssistant` mutation and `ChatResponse` type. Resolvers implement message validation and a simulated response stub. Real LLM connection, server-side weather context grounding, and guardrail enforcement remain deferred to Phase 9.
 - **Future Feature Domains**: Future feature domains (Air Quality, Astronomy, Radar, Hazards) will attach as clean resolvers and types under this established schema.
 
 ---
@@ -262,3 +264,41 @@ query GetSaved($limit: Int) {
   }
 }
 ```
+
+### Mutation: Ask Weather Assistant (Phase 9 Stub)
+```graphql
+mutation AskAssistant($message: String!, $coords: CoordinatesInput) {
+  askWeatherAssistant(message: $message, coordinates: $coords) {
+    reply
+    isOffTopic
+  }
+}
+```
+
+---
+
+## 5. Weather Assistant Mutation & Phase 9 Preparation
+
+The GraphQL API already includes the architectural foundation for the Weather Assistant feature planned for Phase 9.
+
+### Current Implemented State (Architectural Stub)
+- **SDL Schema (`typeDefs.ts`)**:
+  - `type ChatResponse`: Contains `reply: String!` and `isOffTopic: Boolean!`.
+  - `askWeatherAssistant(message: String!, coordinates: CoordinatesInput): ChatResponse!`.
+- **Resolver Implementation (`weatherResolvers.ts`)**:
+  - Validates that `message` is non-empty (returns GraphQL validation error if blank).
+  - Returns a structured simulated reply acknowledging coordinates and confirming readiness for Phase 9 AI backend wiring (`isOffTopic: false`).
+- **Client Operation Document (`operations.ts`)**:
+  - `ASK_WEATHER_ASSISTANT_MUTATION` defined with TypeScript variable types.
+- **Frontend UI Preview (`WeatherAssistant.tsx`)**:
+  - Interactive chat drawer on the dashboard displaying user/assistant messages and location-aware welcome banner.
+
+### Deferred to Phase 9 (Weather Chatbot Milestone)
+The backend does **NOT** currently connect to an LLM. The following pieces constitute the Phase 9 milestone:
+- **LLM Provider Integration**: Connecting the `askWeatherAssistant` resolver to an AI provider. (The provider is **not yet finalized**; `LLM_API_KEY` remains a generic contract).
+- **Server-Side Meteorological Grounding**: Automatically querying `weatherService.ts` for the supplied `coordinates` and formatting the current temperature, wind, humidity, and forecasts into the system prompt context.
+- **Server-Side Guardrail Enforcement**: Validating user intent and setting `isOffTopic: true` if questions stray outside meteorological and weather-planning domains.
+- **Frontend Live GraphQL Invocation**: Updating `WeatherAssistant.tsx` to dispatch the GraphQL mutation instead of local mock simulation.
+- **Secure Key Provisioning**: Configuring `LLM_API_KEY` in AWS SSM Parameter Store / deployment environments.
+- **Deterministic Automated Tests**: Verifying guardrail rejections, weather grounding, and error resilience.
+

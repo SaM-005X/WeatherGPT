@@ -1,13 +1,16 @@
-# Simple Weather Web Application — System Architecture
+# WeatherGPT — System Architecture
 
 ## 1. Architectural Principles
 
 1. **Simplicity Over Complexity**: Minimal moving parts, avoiding Kubernetes, microservices, or complex spatial pipelines.
-2. **Serverless on AWS (Future)**: Low-overhead serverless execution (AWS Lambda + HTTP API Gateway) scaling to zero when idle.
-3. **Simple Relational Caching (Future)**: Deterministic coordinate/location lookup in Supabase PostgreSQL; no complex spatial calculations.
-4. **Focused Weather Chatbot (Future)**: Simple weather-topic guardrail ensuring the assistant only answers weather questions using trusted data.
-5. **Clear Application Boundaries**: GraphQL is strictly the application's internal API layer; external weather providers use standard REST.
-6. **Single Source of Truth for Location (Phase 2)**: The frontend maintains one active location state consumed by the header, location cards, map, and future weather queries.
+2. **Single Source of Truth for Location**: The frontend maintains one active location state in `LocationContext` consumed by the header, navigation modal, location cards, map, and weather domain services.
+3. **Provider-Agnostic Domain Services**: `weatherService.ts` encapsulates meteorological requests and normalizes them into clean Celsius domain models. External weather providers use standard REST (Open-Meteo).
+4. **Deterministic In-Memory Caching & Freshness**: Tiered freshness windows (5m current, 30m hourly, 2h daily, 24h stale fallback) with in-flight request deduplication and non-destructive UI updates.
+5. **Clear Application Boundaries**: GraphQL is strictly the application's internal API layer at `/api/graphql`; the dashboard currently operates on direct `weatherService.ts` with zero disruption.
+6. **Relational Persistence (Current Implementation)**: Supabase PostgreSQL stores user-selected locations (`public.locations`) and caches 30-day geocoding search queries (`public.geocoding_cache`) with Row Level Security.
+7. **Serverless on AWS (Local Foundation / Cloud Deployment Deferred)**: Serverless execution foundation (`backend/` with Lambda, API Gateway v2, EventBridge, CloudWatch) implemented and verified locally; actual cloud provisioning remains deferred.
+8. **Focused Weather Chatbot (Partially Implemented Preview / Future Phase 9 AI)**: Simple weather-topic guardrail ensuring the assistant only answers weather questions using trusted data. The frontend UI preview and typed GraphQL contract stub exist today; real LLM integration and server-side guardrail enforcement are planned for Phase 9.
+9. **Interactive Mapping & Doppler Radar (Implemented in Phase 8)**: Keyless Leaflet mapping, live RainViewer Doppler radar tile overlay with lifecycle management, real-time Cloud Cover HUD, and multi-instance coordinate synchronization.
 
 ---
 
@@ -94,21 +97,25 @@ The location model (`src/types/location.ts`) is designed to map directly to futu
 
 ---
 
-## 3. End-to-End System Architecture (Full-Stack Roadmap)
+## 3. End-to-End System Architecture (Target Full-Stack Architecture)
+
+> **Architectural Status Note**:
+> This diagram illustrates the complete target deployment topology. The **Frontend**, **Leaflet Map**, **RainViewer Doppler Radar**, **Cloud Cover HUD**, **Location System**, **weatherService**, and **Supabase Database (locations & geocoding_cache)** are fully implemented and verified. The **GraphQL Gateway** and **AWS Backend Foundation** are implemented and verified locally, while actual AWS cloud deployment, Cloudflare edge, and Phase 9+ AI modules remain future targets.
 
 ```mermaid
 flowchart TD
-    UserClient["User Browser / Client"] -->|"HTTPS"| Cloudflare["Cloudflare (DNS / Full Strict SSL / CDN)"]
+    UserClient["User Browser / Client"] -->|"HTTPS"| Cloudflare["Cloudflare (Target: DNS / Full Strict SSL / CDN)"]
     
-    subgraph FrontendApp["Frontend (Next.js + Tailwind — Phase 1 & 2 COMPLETED)"]
+    subgraph FrontendApp["Frontend (Next.js 16 + React 19 + Tailwind v4 — Implemented)"]
         Cloudflare -->|"Serves UI Pages"| NextApp["Next.js Application"]
-        NextApp --> LocHook["useLocationSystem (Single Source of Truth)"]
-        LocHook --> MapModule["Simple Map (Leaflet Dynamic Sync + Accuracy Circle)"]
-        NextApp --> ChatModule["Weather Chatbot Drawer"]
-        NextApp --> GQLClient["GraphQL Client (Future Phase 5)"]
+        NextApp --> LocHook["LocationContext (Single Source of Truth)"]
+        LocHook --> MapModule["Leaflet Map (Dynamic Sync + Radar + Cloud HUD — Implemented)"]
+        NextApp --> ChatModule["Weather Assistant Drawer (Preview / Partial Impl — Phase 9 Target)"]
+        NextApp --> DirectWeather["Direct weatherService.ts (Active Dashboard)"]
+        NextApp --> GQLClient["GraphQL Adapter / Client (Verified Parity)"]
     end
 
-    subgraph AWSCloud["AWS Serverless Backend (Future Phase 6)"]
+    subgraph AWSCloud["AWS Serverless Backend (Local IaC Verified; Cloud Deployment Deferred)"]
         GQLClient -->|"POST /graphql (lat, lon)"| APIGW["API Gateway (HTTP API v2)"]
         APIGW --> GQL_Lambda["GraphQL Lambda Handler (Node.js/TS)"]
         
@@ -121,27 +128,28 @@ flowchart TD
     end
 
     subgraph ExternalServices["External Providers"]
-        WeatherAPI["External Weather Provider (REST API)"]
-        RainViewer["Radar Tile Service (RainViewer / OSM)"]
-        LLMProvider["LLM API (Gemini / Anthropic / OpenAI)"]
+        WeatherAPI["Open-Meteo REST API (Live Weather & Geocoding)"]
+        RainViewer["Radar Tile Service (RainViewer API v2 — Implemented Phase 8)"]
+        LLMProvider["LLM API (Future Phase 9 Chatbot — Provider Not Yet Finalized)"]
     end
 
-    subgraph DatabaseLayer["Supabase PostgreSQL (Future Phase 4)"]
-        SupaDB[("Supabase PostgreSQL\n(Simple Tables & Cache)")]
+    subgraph DatabaseLayer["Supabase PostgreSQL (Current Implementation)"]
+        SupaDB[("Supabase PostgreSQL\n(locations & geocoding_cache tables)")]
     end
 
     %% Data Flow Connections
-    GQL_Lambda -->|"1. Check Short-Lived Cache (~5 min)"| SupaDB
-    GQL_Lambda -->|"2. If Stale: Fetch REST Weather"| WeatherAPI
-    WeatherAPI -->|"3. Save Updated Weather"| SupaDB
-    GQL_Lambda -->|"4. Return Typed GraphQL Response"| APIGW
+    DirectWeather -->|"1. In-Memory Cache Check (< 1ms)"| DirectWeather
+    DirectWeather -->|"2. If Miss/Stale: Fetch REST Weather"| WeatherAPI
+    
+    GQL_Lambda -->|"A. Delegate to weatherService.ts"| DirectWeather
+    GQL_Lambda -->|"B. Delegate to persistenceService.ts"| SupaDB
+    GQL_Lambda -->|"C. Return Typed GraphQL Response"| APIGW
 
-    Sync_Lambda -->|"A. Read Active Locations"| SupaDB
-    Sync_Lambda -->|"B. Fetch Latest Forecast (REST)"| WeatherAPI
-    Sync_Lambda -->|"C. Persist Hourly / Daily Forecast"| SupaDB
+    Sync_Lambda -->|"I. Read Recent Locations"| SupaDB
+    Sync_Lambda -->|"II. Warm Weather Caches"| WeatherAPI
 
-    GQL_Lambda -->|"Weather Guardrail + Trusted Weather Context"| LLMProvider
-    MapModule -->|"Direct Tile Layer"| RainViewer
+    GQL_Lambda -.->|"Weather Guardrail (Phase 9)"| LLMProvider
+    MapModule -.->|"Direct Radar Tile Layer (Implemented Phase 8)"| RainViewer
 ```
 
 ---
@@ -246,17 +254,21 @@ In Phase 3.1, a dedicated resolution layer was introduced to guarantee that sear
 ---
 
 ## 4. Current Milestone Status
-- **Phase 0**: Completed.
-- **Phase 1**: Completed.
-- **Phase 2**: Completed.
-- **Phase 2.1**: Completed.
-- **Phase 3**: Completed.
-- **Phase 3.1**: Completed.
-- **Phase 4**: Completed.
-- **Phase 4.1**: Completed.
+- **Phase 0**: Completed (Planning & Simplified Architecture).
+- **Phase 1**: Completed (Native Frontend Foundation).
+- **Phase 2**: Completed (Location System & Leaflet Sync).
+- **Phase 2.1**: Completed (Frontend Stabilization & Visual Polish).
+- **Phase 3**: Completed (Live Weather Integration via Open-Meteo).
+- **Phase 3.1**: Completed (Universal Location Search & Resolution).
+- **Phase 4**: Completed (Supabase Persistent Locations & Geocoding Cache).
+- **Phase 4.1**: Completed (Automatic 10m Weather Refresh & Live Saved Locations).
 - **Step 1**: Completed (Navigation Shell & Shared Location Context).
 - **Phase 5**: Completed (GraphQL Foundation & Application Gateway).
-- **Phase 6**: Pending (AWS Serverless Setup).
+- **Phase 6**: Completed (AWS Serverless Setup — Implemented & verified locally; cloud deployment deferred).
+- **Phase 7**: Completed (Weather Updates & Freshness Pipeline).
+- **Phase 7.2**: Completed (Final Stabilization / Performance & Abort Handling).
+- **Phase 8**: Completed (Simple Weather & Cloud Map — RainViewer Doppler Radar, Cloud Cover HUD, /maps, and Leaflet Sync).
+- **Phase 9**: Pending (Weather Chatbot — Next Feature Milestone: LLM integration, server-side weather grounding, and guardrail enforcement).
 
 ---
 
@@ -491,6 +503,126 @@ To prevent race conditions where a manual refresh, an automatic refresh, and an 
   2. Open-Meteo REST API is high-performance (< 200ms) with generous limits.
   3. The enhanced in-memory cache with tiered freshness, in-flight deduplication, and stale fallback delivers sub-millisecond (< 1ms) responses with zero database latency and zero maintenance overhead.
   4. Persistent weather tables are deferred to future phases when cross-container multi-region distributed caching (e.g. Redis / ElastiCache) or historical analytics are required.
+
+---
+
+## 10. Final Stabilization, Performance & Abort Handling (Implemented in Phase 7.2)
+
+Phase 7.2 hardened the concurrent execution model, request deduplication, and UI lifecycle management to ensure zero unhandled rejections and uninterrupted user experience.
+
+```text
+[ Concurrent Caller 1 ] ──► fetchWeatherData(lat, lon, { signal: c1 }) ─┐
+                                                                           ├─► [ Single In-Flight Request ]
+[ Concurrent Caller 2 ] ──► fetchWeatherData(lat, lon, { signal: c2 }) ─┘          │
+                                                                                    ▼
+Caller 1 aborts (c1.abort())                                            [ Open-Meteo REST API ]
+  ├─► Caller 1 rejects gracefully with AbortError                                   │
+  └─► Caller 2 continues unaffected ◄───────────────────────────────────────────────┘
+        │
+        ▼
+Resolves valid WeatherReport & populates in-memory cache for instant subsequent calls (< 20ms)
+```
+
+### Architectural Key Characteristics
+1. **Caller Cancellation Isolation**:
+   - Individual caller `AbortSignal`s are decoupled from the shared in-flight fetch via `attachAbortSignal()`.
+   - When a caller cancels (e.g. React StrictMode unmount, rapid tab switch, or navigation away), only that caller's promise is rejected. The shared underlying network fetch completes normally, populating the cache and serving concurrent callers without throwing an unhandled `AbortError`.
+2. **In-Flight Map Registry Pruning**:
+   - `inFlightRequests` Map registry entries are reliably cleaned up in a `finally` block upon promise resolution or error.
+   - Rapid sequential location switches (e.g. Kolkata -> London -> Kolkata) execute cleanly without abort collisions or stale promise retention.
+3. **Non-Destructive Loading-State Handling**:
+   - Initial data load is strictly decoupled from subsequent refreshes.
+   - Skeletons render strictly when `!data`. When weather data is already present, manual and automatic refreshes activate a non-intrusive `isRefreshing` indicator, completely eliminating screen flickering and layout shift.
+4. **Stale-While-Revalidate Fallback**:
+   - Non-forced network failures retain cached observations for up to 24 hours with `isStale: true`, ensuring continuity during provider outages.
+5. **Quality & Test Baseline (Historical Phase 7.2)**:
+   - Verified across **68 / 68 automated tests** spanning 10 test suites (including `freshnessBugInvestigation.test.ts` and `inFlightAbortRegression.test.ts`).
+   - Verified **0 TypeScript errors**, **0 ESLint errors/warnings**, and clean Next.js production build (`next build` generating 16 routes).
+6. **Deployment Boundaries**:
+   - AWS cloud deployment remains deferred / unprovisioned.
+   - Docker containerization remains strictly deferred to Phase 10.
+   - Cloudflare remains a future deployment target.
+
+---
+
+## 11. Simple Weather & Cloud Map Architecture (Implemented in Phase 8)
+
+Phase 8 enriches WeatherGPT with interactive geospatial visualization, real-time Doppler precipitation radar, and sky coverage telemetry while strictly adhering to keyless architectural simplicity.
+
+```text
+[ activeLocation (lat, lon) ] ───► [ LocationContext ]
+             │                             │
+             │ Coordinates                 │ Coordinates
+             ▼                             ▼
+┌─────────────────────────┐   ┌───────────────────────────────┐
+│   weatherService.ts     │   │     WeatherMapInternal.tsx    │
+│  (Open-Meteo REST API)  │   │  (Leaflet Dynamic Center/Zoom)│
+└────────────┬────────────┘   └───────────────┬───────────────┘
+             │                                │
+             │ cloud_cover (0-100%)           │ Radar Toggle: ON
+             ▼                                ▼
+┌─────────────────────────┐   ┌───────────────────────────────┐
+│     Cloud Cover HUD     │   │     rainViewerService.ts      │
+│  "Cloud Cover: 42%      │   │   (RainViewer API v2 JSON)    │
+│   Partly Cloudy"        │   └───────────────┬───────────────┘
+└─────────────────────────┘                   │
+                                              │ Latest Radar Timestamp
+                                              ▼
+                              ┌───────────────────────────────┐
+                              │    Leaflet TileLayer Overlay  │
+                              │  (tile.rainviewer.com/v2/...) │
+                              │    clamped at maxNativeZoom 7 │
+                              └───────────────────────────────┘
+```
+
+### Architectural Key Characteristics
+1. **Keyless RainViewer Doppler Radar Service (`rainViewerService.ts`)**:
+   - Fetches live radar frame metadata from RainViewer API v2 (`https://api.rainviewer.com/public/weather-maps.json`) requiring zero credentials or API keys.
+   - Enforces a 5-minute in-memory cache (`RADAR_CACHE_TTL_MS = 300000`) and in-flight request deduplication to prevent redundant network fetches.
+   - Provides graceful fallback returning stale timestamp metadata if upstream network requests encounter transient errors.
+   - Clamps radar tile layers to `maxNativeZoom: 7` (`L.tileLayer(..., { maxNativeZoom: 7, opacity: 0.65 })`) to avoid HTTP 404 tile errors beyond RainViewer's native radar coverage, while allowing the underlying OpenStreetMap base map to zoom cleanly up to Leaflet max.
+2. **Deterministic Layer Lifecycle Management (`WeatherMapInternal.tsx`)**:
+   - Safely mounts and tears down radar tile layers using a version-tracked ref (`layerIdRef`).
+   - Automatically removes stale radar layers before mounting new layers during rapid toggling or location updates, preventing tile leakage and memory bloat.
+3. **Cloud Cover Telemetry & Dynamic HUD**:
+   - Enriches Open-Meteo REST queries with `cloud_cover` parameters for both current observations and hourly projections.
+   - Renders a floating Cloud Cover HUD displaying real-time cloud percentage and semantic descriptors (`Clear: 0–19%`, `Partly Cloudy: 20–59%`, `Mostly Cloudy: 60–84%`, `Overcast: 85–100%`).
+4. **UI Layout Separation (Zoom Controls / Top Bar)**:
+   - Corrective positioning applied to the map top bar (`top-2.5 left-14 right-2.5`) providing a 12px horizontal buffer from Leaflet's native zoom controls (`+ / −` at `left: 10px`), ensuring zero overlap on both dashboard cards and `/maps`.
+5. **Multi-Instance Support**:
+   - Powers both the compact dashboard preview card (`src/components/map/WeatherMap.tsx`) and the dedicated full-page route (`src/app/maps/page.tsx`).
+6. **Quality & Verification Baseline**:
+   - Verified across **85 / 85 automated tests** spanning 12 test suites (including `rainViewerService.test.ts` and `mapUiIntegration.test.ts`).
+   - Verified **0 TypeScript errors**, **0 ESLint errors/warnings**, and clean Next.js production build (`next build` generating 16 routes).
+
+---
+
+## 12. Weather Assistant Architecture & Preparation (Partially Implemented / Phase 9 Target)
+
+WeatherGPT includes a dedicated Weather Assistant component designed to provide natural-language answers grounded strictly in verified meteorological data.
+
+### 1. Current Verified Implementation (Partial)
+- **Frontend Chatbot UI (`src/components/chatbot/WeatherAssistant.tsx`)**:
+  - Interactive chat interface rendered directly on the dashboard.
+  - Features labeled header ("Weather Assistant" / "Weather-only Advisor"), local message thread state, location-aware greeting, input validation, send button, and preview responses.
+- **GraphQL Schema & Resolvers (`typeDefs.ts`, `weatherResolvers.ts`)**:
+  - SDL includes `type ChatResponse { reply: String!, isOffTopic: Boolean! }`.
+  - Mutation `askWeatherAssistant(message: String!, coordinates: CoordinatesInput): ChatResponse!`.
+  - Resolver stub validates message length and returns a structured response indicating Phase 9 connection readiness.
+- **Client Operations (`operations.ts`)**:
+  - Typed `ASK_WEATHER_ASSISTANT_MUTATION` ready for invocation.
+- **AWS Backend Compatibility**:
+  - Reused in AWS Lambda (`backend/src/handlers/graphql.ts`) and configured with generic `LLM_API_KEY` secret parameter.
+
+### 2. Remaining Phase 9 Target Scope
+The Weather Assistant is **NOT** a completed AI chatbot. The following components will be implemented in Phase 9:
+- **LLM Provider Integration**: Connecting the server-side resolver to an LLM provider. (Note: The provider is **not yet finalized**; `LLM_API_KEY` remains a generic contract).
+- **Server-Side Meteorological Grounding**: Injecting verified current observations and forecast models directly into the prompt context.
+- **Server-Side Weather Guardrail**: Deterministic classifier ensuring the assistant rejects non-weather queries (`isOffTopic: true`).
+- **Frontend Mutation Dispatch**: Replacing the local preview handler with live GraphQL mutation calls.
+- **Secure Secret Provisioning**: Provisioning runtime API keys in SSM/Secrets Manager for production execution.
+- **Automated AI Tests**: Deterministic test suites validating guardrail rejection and grounded responses.
+
 
 
 

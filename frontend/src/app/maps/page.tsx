@@ -1,11 +1,41 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocationContext } from '@/context/LocationContext';
 import { WeatherMap } from '@/components/map/WeatherMap';
+import { fetchWeatherData } from '@/lib/weatherService';
+import { CurrentWeather } from '@/types/weather';
 
 export default function MapsPage() {
   const { activeLocation, openLocationSearch } = useLocationContext();
+  const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    async function loadLocationWeather() {
+      try {
+        const report = await fetchWeatherData(
+          activeLocation.latitude,
+          activeLocation.longitude
+        );
+        if (isSubscribed && report?.current) {
+          setCurrentWeather(report.current);
+        }
+      } catch {
+        // Graceful degradation: Map continues to work even if weather fetch fails
+        if (isSubscribed) {
+          setCurrentWeather(null);
+        }
+      }
+    }
+
+    loadLocationWeather();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [activeLocation.latitude, activeLocation.longitude]);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 space-y-6">
@@ -47,6 +77,9 @@ export default function MapsPage() {
           locationName={activeLocation.name}
           accuracy={activeLocation.accuracy}
           source={activeLocation.source}
+          cloudCover={currentWeather?.cloudCover}
+          conditionDescription={currentWeather?.conditionDescription}
+          condition={currentWeather?.condition}
           className="h-[500px] w-full"
         />
 
@@ -56,13 +89,13 @@ export default function MapsPage() {
             <span className="font-semibold text-slate-800">Base Map</span>
             <p className="text-[11px] text-slate-500 mt-0.5">OpenStreetMap Standard</p>
           </div>
-          <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
-            <span className="font-semibold text-slate-800">Doppler Radar</span>
-            <p className="text-[11px] text-sky-600 mt-0.5">RainViewer Tile Ready</p>
+          <div className="rounded-lg bg-sky-50/70 p-2.5 border border-sky-200/80">
+            <span className="font-semibold text-sky-900">Doppler Radar</span>
+            <p className="text-[11px] text-sky-700 mt-0.5">RainViewer API v2 Live</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
-            <span className="font-semibold text-slate-800">Infrared Clouds</span>
-            <p className="text-[11px] text-slate-500 mt-0.5">Global Satellite Ready</p>
+            <span className="font-semibold text-slate-800">Cloud Metric HUD</span>
+            <p className="text-[11px] text-slate-500 mt-0.5">Open-Meteo Synced</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
             <span className="font-semibold text-slate-800">Geohazards</span>

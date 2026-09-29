@@ -83,6 +83,7 @@ assert(urlLondon.includes('longitude=-0.1278'));
 assert(urlLondon.includes('timezone=auto'));
 assert(urlLondon.includes('forecast_days=7'));
 assert(urlLondon.includes('current=temperature_2m'));
+assert(urlLondon.includes('cloud_cover'));
 assert(urlLondon.includes('hourly=temperature_2m'));
 assert(urlLondon.includes('daily=weather_code'));
 
@@ -136,8 +137,14 @@ assert.strictEqual(normalizedCurrent.isCached, false);
 const calculatedIso = calculateObservationIso('2026-09-24T20:00', 3600);
 assert.strictEqual(calculatedIso, '2026-09-24T19:00:00.000Z');
 assert.strictEqual(normalizedCurrent.recordedAt, '2026-09-24T19:00:00.000Z');
+assert.strictEqual(normalizedCurrent.cloudCover, undefined); // optional when not present in raw
 
-console.log('✔ Current Weather Normalization passed.');
+// Cloud Cover Normalization verification
+const mockCurrentWithCloud = { ...mockCurrentRaw, cloud_cover: 75.4 };
+const normalizedWithCloud = normalizeCurrentWeather(mockCurrentWithCloud, 3600, false);
+assert.strictEqual(normalizedWithCloud.cloudCover, 75);
+
+console.log('✔ Current Weather Normalization (including cloudCover) passed.');
 
 // ============================================================================
 // 4. Hourly Forecast Normalization Tests

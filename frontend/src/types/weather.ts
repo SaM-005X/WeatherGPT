@@ -30,6 +30,7 @@ export interface CurrentWeather {
   uvIndex?: number;
   pressure?: number;
   visibility?: number;
+  cloudCover?: number;
   recordedAt: string;
   isCached?: boolean;
   isStale?: boolean;

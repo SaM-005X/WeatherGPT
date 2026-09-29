@@ -1,12 +1,19 @@
-# Simple Weather Web Application — Deployment Guide
+# WeatherGPT — Deployment Guide
 
-## 1. Simplified Deployment Overview
+## 1. Target Deployment Overview
 
-The application uses a standard, low-maintenance deployment topology:
-- **Cloudflare**: DNS management, Full (Strict) SSL/HTTPS termination, and static asset CDN.
+> **ARCHITECTURAL BOUNDARY NOTICE**:
+> This document specifies the **Target Deployment Architecture** planned for future production releases.
+> - Current application status: Fully developed, executed, and verified **locally**.
+> - **AWS Cloud Deployment**: Currently **DEFERRED / UNPROVISIONED**.
+> - **Docker Containerization**: Strictly deferred to **Phase 10**.
+> - **Cloudflare Edge**: Planned for **Phase 11**.
+
+The target production topology consists of:
+- **Cloudflare (Phase 11 Target)**: DNS management, Full (Strict) SSL/HTTPS termination, and static asset CDN.
 - **Frontend Hosting**: Next.js deployed to standard hosting or container runner with Cloudflare proxy.
-- **Backend Hosting**: AWS Lambda behind AWS API Gateway (HTTP API v2).
-- **Database**: Supabase PostgreSQL.
+- **Backend Hosting (AWS Lambda Target)**: AWS Lambda behind AWS API Gateway (HTTP API v2).
+- **Database (Supabase PostgreSQL)**: Managed PostgreSQL hosting `locations` and `geocoding_cache` tables.
 
 > **Cloudflare Simplicity Constraint**:
 > Cloudflare is kept strictly simple:
@@ -18,7 +25,7 @@ The application uses a standard, low-maintenance deployment topology:
 
 ---
 
-## 2. Cloudflare Configuration
+## 2. Cloudflare Configuration (Target Phase 11)
 
 1. **DNS Management**:
    - Add `A` or `CNAME` records pointing to the frontend host and AWS API Gateway.
@@ -34,22 +41,24 @@ The application uses a standard, low-maintenance deployment topology:
 
 ## 3. Environment Variables Matrix
 
-| Variable | Environment | Destination | Purpose |
-| :--- | :--- | :--- | :--- |
-| `NODE_ENV` | Production / Local | All | Execution mode (`production` / `development`) |
-| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Production / Local | Frontend | URL of GraphQL endpoint |
-| `NEXT_PUBLIC_MAP_DEFAULT_LAT` | Production / Local | Frontend | Default latitude if geolocation is denied |
-| `NEXT_PUBLIC_MAP_DEFAULT_LON` | Production / Local | Frontend | Default longitude if geolocation is denied |
-| `SUPABASE_URL` | Production / Local | AWS Lambda | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Production / Local | AWS Lambda | Privileged backend secret key |
-| `LLM_API_KEY` | Production / Local | AWS Lambda | API key for weather chatbot |
-| `WEATHER_API_KEY` | Production / Local | AWS Lambda | Optional backup provider API key |
+| Variable | Environment | Destination | Purpose | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `NODE_ENV` | Production / Local | All | Execution mode (`production` / `development`) | Active |
+| `NEXT_PUBLIC_SUPABASE_URL` | Production / Local | Frontend | Public Supabase API gateway URL | **Active in Frontend** |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Production / Local | Frontend | Public safe anon key for RLS-protected queries | **Active in Frontend** |
+| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Production / Local | Frontend | URL of GraphQL endpoint (local `/api/graphql` or future API Gateway) | Active |
+| `NEXT_PUBLIC_MAP_DEFAULT_LAT` | Production / Local | Frontend | Default latitude if geolocation is denied | Active |
+| `NEXT_PUBLIC_MAP_DEFAULT_LON` | Production / Local | Frontend | Default longitude if geolocation is denied | Active |
+| `SUPABASE_URL` | Production / Local | AWS Lambda | Supabase project URL for serverless backend | Configured in IaC |
+| `SUPABASE_SERVICE_ROLE_KEY` | Production / Local | AWS Lambda | Privileged backend secret key (NEVER in frontend) | Configured in IaC |
+| `LLM_API_KEY` | Production / Local | AWS Lambda | API key for weather chatbot (Future Phase 9) | Configured in IaC |
+| `WEATHER_API_KEY` | Production / Local | AWS Lambda | Optional backup provider API key | Configured in IaC |
 
 ---
 
-## 4. Simplified Deployment Sequence
+## 4. Target Deployment Sequence
 
-1. **Supabase**: Run migrations to create tables and indexes.
-2. **AWS Lambda**: Deploy serverless backend using `serverless deploy` with secrets configured in AWS SSM.
-3. **Frontend**: Build and deploy Next.js frontend with `NEXT_PUBLIC_GRAPHQL_ENDPOINT` pointing to API Gateway.
-4. **Cloudflare**: Route domain via Cloudflare with Full (Strict) SSL.
+1. **Supabase**: Execute migrations (`supabase/migrations/20260925000000_create_locations_and_geocoding_cache.sql`) to set up `locations`, `geocoding_cache`, and RLS policies.
+2. **AWS Lambda**: Deploy serverless backend using `serverless deploy` or AWS SAM with secrets configured in AWS SSM Parameter Store (`/weather-gpt/prod/*`).
+3. **Frontend**: Build and deploy Next.js frontend with `NEXT_PUBLIC_GRAPHQL_ENDPOINT` pointing to API Gateway (or use self-hosted Next.js).
+4. **Cloudflare**: Route custom domain via Cloudflare with Full (Strict) SSL and edge CDN caching.

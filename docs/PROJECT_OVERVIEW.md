@@ -1,62 +1,82 @@
-# Simple Weather Web Application — Project Overview
+# WeatherGPT — Project Overview
 
 ## 1. Executive Summary
 
-The **Simple Weather Web Application** is a clean, focused, full-stack weather application delivering current meteorological conditions, today's/hourly forecasts, 7-day forecasts, a simple weather/cloud map, and a simple weather chatbot.
+**WeatherGPT** is a clean, focused, full-stack weather application delivering current meteorological conditions, hourly forecasts, 7-day outlooks, an interactive map, and a weather domain assistant.
 
-The platform follows a straightforward **Serverless Backend & Cache-Aside Architecture** using AWS Lambda, GraphQL, and Supabase PostgreSQL.
+The platform follows a clean **Decoupled Architecture** featuring a Next.js frontend, an in-memory tiered weather cache, Supabase PostgreSQL for location and geocoding persistence, an internal GraphQL application gateway, and a locally verified AWS Serverless backend foundation.
 
 ---
 
-## 2. Core Objectives & Scope
+## 2. Implementation Boundaries (Current vs. Deferred)
 
-### In-Scope (Phase 0 – Phase 12)
-- **Location**: Device geolocation with fallback to manual location search (city/coordinates).
-- **Current Weather**: Live conditions with ~5-minute cache checking.
-- **Forecasts**: Today's/hourly forecast and 7-day daily forecast.
-- **Simple Weather Map**: Basic interactive map displaying cloud cover and weather/radar layers.
-- **Periodic Weather Updates**: Supabase persistent storage with scheduled background forecast warming via AWS EventBridge (~30-minute intervals).
-- **GraphQL Application API**: Clean GraphQL schema serving as the application API layer on AWS Lambda (calling external REST weather provider and Supabase).
-- **Weather Chatbot**: Simple weather assistant that answers weather questions using trusted current weather data, with a simple weather-only guardrail that returns a polite refusal for off-topic queries.
-- **Containerization (Phase 10)**: Dockerfile and Docker container for the local application after it works correctly locally.
-- **Deployment**: Standard Cloudflare setup (DNS, HTTPS / Full (Strict) SSL, and CDN caching).
+### Current Verified Implementation (Phases 0 – 8)
+- **Location System**: Global `LocationContext` providing single-source-of-truth coordinates (`activeLocation.latitude`, `activeLocation.longitude`), device geolocation, universal text search with geocoding disambiguation, and direct coordinate parsing.
+- **Current Weather & Forecasts**: Live meteorological conditions, 24-hour hourly projections, and 7-day daily outlooks via `weatherService.ts` querying the Open-Meteo REST API.
+- **Interactive Weather Map & Doppler Radar (Phase 8)**:
+  - Standard Leaflet map dynamically centered on active coordinates with marker and GPS accuracy circle (`L.circle`).
+  - Keyless RainViewer Doppler radar tile overlay via dedicated `rainViewerService.ts` (5-minute metadata cache, in-flight deduplication, stale fallback, `maxNativeZoom: 7`).
+  - User-facing "📡 Radar: ON / OFF" toggle control with version-tracked layer lifecycle management.
+  - Floating Cloud Cover HUD displaying real-time cloudiness percentage and condition descriptions.
+  - Symmetrical, non-overlapping control layout ensuring full accessibility of Leaflet's native `+` / `−` zoom buttons and the Radar toggle.
+  - Multi-instance support across Dashboard (`h-72`) and dedicated `/maps` page (`h-[500px]`).
+- **Freshness & Caching Pipeline**:
+  - Current weather: 5-minute freshness window.
+  - Hourly forecast: 30-minute freshness window.
+  - 7-day daily outlook: 2-hour freshness window.
+  - Stale fallback retention: Up to 24 hours on network or provider failure (`isStale: true`).
+  - In-flight request deduplication and caller cancellation isolation (`AbortController`).
+  - Automatic refresh every 10 minutes with tab visibility detection; non-destructive refresh preserving displayed weather.
+- **Weather Assistant Preview (Phase 9 Preparation)**:
+  - Partially implemented: Functional `WeatherAssistant.tsx` UI on Dashboard with message state, location-aware greeting, input validation, and preview response.
+  - GraphQL schema contract (`askWeatherAssistant`), client mutation operation, and resolver stub implemented. (AI backend and guardrails connect in Phase 9).
+- **Supabase Persistence**:
+  - `public.locations`: Persists user-selected and recent locations with deterministic 4-decimal coordinate keys.
+  - `public.geocoding_cache`: Caches place-name search results for 30 days.
+  - Protected with Row Level Security (RLS) policies for `anon` and `authenticated` roles.
+- **Internal GraphQL Gateway**: `/api/graphql` powered by GraphQL Yoga and typed SDL schema, delegating to domain services. Active dashboard currently uses direct `weatherService.ts`.
+- **AWS Serverless Foundation (Local / IaC)**: Dedicated `backend/` service with Lambda handlers (`graphql.ts`, `sync.ts`), API Gateway v2 event transformers, structured CloudWatch logger, and dual IaC templates (`serverless.yml`, `template.yaml`) implemented and verified locally.
+- **Verified Quality Baseline**: **85 / 85 automated tests passing across 12 test suites**; 0 TypeScript errors; 0 ESLint errors/warnings; clean Next.js production build.
 
-### Strict Simplicity Constraints (Out-of-Scope)
-- **NO Kubernetes**: Strictly single-container Docker or serverless execution; no K8s, Helm, or cluster orchestration.
-- **NO Disaster-Management Systems**: No earthquake, tsunami, volcano, or evacuation features.
-- **NO Complex Analytics / Simulations**: No lightning tracking networks, atmospheric physics models, or complex wind flow simulations.
-- **NO Edge Databases or Cloudflare Workers**: Keep Cloudflare focused strictly on DNS, HTTPS, and basic CDN caching.
-- **NO Complex Spatial Radius Pipelines**: Location lookup uses standard relational fields and deterministic coordinate keys rather than complex multi-kilometer spatial algorithms.
+### Deferred / Target Future Architecture (Phases 9 – 12)
+- **Phase 9 (Next Feature Milestone)**: Weather Chatbot (connecting LLM provider via `LLM_API_KEY`, live meteorological context grounding, and server-side weather-only guardrails).
+- **Phase 10**: Docker containerization (multi-stage Dockerfile and container verification strictly deferred until Phase 10).
+- **Phase 11**: Cloudflare Edge & HTTPS (target deployment architecture for DNS, Full (Strict) SSL, and static CDN).
+- **Phase 12**: Testing & Final Verification (release readiness sign-off).
+- **AWS Cloud Deployment**: Actual cloud provisioning in an AWS account remains deferred.
+- **Persistent Weather Snapshot Tables**: `weather_snapshots`, `forecast_hourly`, and `forecast_daily` tables remain deferred in favor of the high-performance in-memory cache.
+- **Placeholder Sub-Routes**: `/earthquakes`, `/volcanoes`, `/activities`, `/alerts`, `/nowcast`, `/storms`, `/air-quality`, and `/astronomy` are presentational UI placeholders; backend services and live data integration remain deferred to future feature expansions.
 
 ---
 
 ## 3. Technology Stack Summary
 
-| Layer | Primary Technology | Purpose & Role |
-| :--- | :--- | :--- |
-| **Frontend Framework** | **Next.js (App Router, React, TypeScript)** | Modern React frontend for weather dashboards, location search, and chatbot drawer. |
-| **Styling** | **Tailwind CSS** | Clean, responsive UI with light/dark theme support. |
-| **Mapping** | **Simple map library (Leaflet / react-leaflet)** | Simple interactive map for clouds and precipitation overlays. |
-| **API Layer** | **GraphQL (AWS Lambda)** | Application API layer between frontend and backend services. |
-| **Backend Runtime** | **Node.js (TypeScript) on AWS Lambda** | Simplest suitable runtime for Lambda + GraphQL; shares TypeScript types with frontend. |
-| **Database & Persistence** | **Supabase PostgreSQL** | Stores locations, current weather snapshots, and forecast history. PostGIS enabled for future readiness, but queries remain simple standard SQL. |
-| **AWS Serverless** | **Lambda, API Gateway (HTTP API v2), EventBridge, CloudWatch, Secrets Manager** | Serverless execution, ~30-min scheduled forecast warming, and secure secret storage. |
-| **External Weather** | **External Weather Provider (REST)** | Upstream meteorological source (e.g. Open-Meteo). GraphQL is our app layer, not required of provider. |
-| **Containerization** | **Docker (Introduced only in Phase 10)** | Production containerization created after the app works locally. |
-| **Edge / Deployment** | **Cloudflare** | Simple DNS management, Full (Strict) SSL/HTTPS termination, and static asset CDN. |
+| Layer | Primary Technology | Current Implementation Status | Purpose & Role |
+| :--- | :--- | :--- | :--- |
+| **Frontend Framework** | **Next.js (App Router, React 19, TypeScript)** | **Implemented & Verified** | Responsive frontend for weather dashboards, location search, and multi-route shell. |
+| **Styling** | **Tailwind CSS** | **Implemented & Verified** | Clean, human-designed light weather-app design system. |
+| **Mapping & Radar** | **Leaflet + RainViewer API v2** | **Implemented & Verified** | Interactive map centered on active coordinates with GPS accuracy circle and Doppler radar overlay. |
+| **Weather Domain Service** | **Open-Meteo REST API via `weatherService.ts`** | **Implemented & Verified** | Upstream meteorological source, cloud cover, WMO mapping, normalization, and tiered cache. |
+| **Database & Persistence** | **Supabase PostgreSQL** | **Implemented & Verified** | Persistent `locations` and 30-day `geocoding_cache` tables with Row Level Security. |
+| **API Layer** | **GraphQL (GraphQL Yoga)** | **Implemented & Verified Locally** | Internal application gateway at `/api/graphql` with typed SDL schema, domain resolvers, and chat stub. |
+| **AI Weather Assistant** | **UI & GraphQL Stub (LLM in Phase 9)** | **Partially Implemented (Phase 9 Target)**| Front-end advisor UI and GraphQL mutation stub; AI backend and guardrails connect in Phase 9. |
+| **Backend Runtime** | **Node.js (TypeScript) on AWS Lambda** | **Implemented & Verified Locally** | Serverless Lambda handlers in `backend/` for GraphQL and EventBridge background sync. |
+| **AWS Cloud Infrastructure** | **API Gateway v2, EventBridge, CloudWatch, SSM** | **IaC Verified Locally; Cloud Deployment Deferred** | Infrastructure as Code (`serverless.yml`, `template.yaml`) prepared for future deployment. |
+| **Containerization** | **Docker** | **Strictly Deferred to Phase 10** | Production containerization created after Phase 9 completion. |
+| **Edge / Production Host** | **Cloudflare** | **Future Target Architecture** | DNS management, Full (Strict) SSL/HTTPS termination, and static asset CDN. |
 
 ---
 
 ## 4. Key Design Decisions
 
-1. **Clear Freshness Model**:
-   - **Current Weather**: Checked on-demand when user opens/refreshes the app. Checks a short-lived (~5 minute) cache in Supabase. If stale, fetches from external REST provider and updates Supabase.
-   - **Background Forecast Updates**: AWS EventBridge triggers a Lambda worker every ~30 minutes to warm and persist forecast and daily outlook data.
-2. **Simple Deterministic Location Caching**:
-   - Stored with standard fields (`latitude`, `longitude`, `location_name`, `cached_at`). Avoids complex spatial radius calculations (`ST_DWithin`).
-3. **Simple Guardrailed Chatbot**:
-   - Straightforward weather guardrail: answers only weather questions using trusted weather data provided by the backend. Refuses off-topic questions with a short polite refusal. No complex intent-classification micro-pipelines.
-4. **Deferred Containerization**:
-   - Application is built and validated locally first (Phases 1–9). Docker is only introduced in Phase 10.
-5. **Simple Cloudflare Integration**:
-   - Standard Cloudflare DNS, HTTPS, and CDN. No Workers, edge databases, or complex custom routing.
+1. **Tiered Freshness & In-Memory Cache**:
+   - Current weather (5 min), hourly forecast (30 min), 7-day outlook (2 hours), and emergency stale fallback (24 hours).
+   - In-flight request deduplication prevents redundant wire calls when manual, auto, or component refreshes coincide.
+2. **Atomic Location Synchronization**:
+   - All location attributes (`name`, `country`, `admin1`, `latitude`, `longitude`, `timezone`) update together atomically in `LocationContext`.
+3. **Local Development Autonomy**:
+   - The application runs 100% locally via `npm run dev` with Next.js and `/api/graphql` without requiring AWS credentials or local cloud emulators.
+4. **Deferred Containerization & Cloud Deployment**:
+   - Containerization is strictly confined to Phase 10. Actual AWS cloud deployment is intentionally deferred.
+5. **Standard Relational Coordinates**:
+   - Coordinate grouping uses standard deterministic keys (`ROUND(latitude, 4),ROUND(longitude, 4)`), avoiding complex spatial radius math.

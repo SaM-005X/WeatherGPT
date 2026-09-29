@@ -1,4 +1,4 @@
-# Simple Weather Web Application — Roadmap
+# WeatherGPT — Roadmap
 
 This roadmap defines the step-by-step implementation plan. Work proceeds sequentially, strictly phase-by-phase without premature execution of downstream phases.
 
@@ -16,10 +16,16 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 [Phase 2] Location System (COMPLETED)
     │
     ▼
+[Phase 2.1] Frontend Stabilization & Visual Polish (COMPLETED)
+    │
+    ▼
 [Phase 3] Weather Service Integration (COMPLETED)
     │
     ▼
-[Phase 4] Supabase PostgreSQL (COMPLETED)
+[Phase 3.1] Universal Location Search & Resolution (COMPLETED)
+    │
+    ▼
+[Phase 4] Supabase Persistent Locations & Geocoding Cache (COMPLETED)
     │
     ▼
 [Phase 4.1] Auto Weather Refresh & Live Saved Locations (COMPLETED)
@@ -31,28 +37,28 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 [Phase 5] GraphQL API Layer & Application Gateway (COMPLETED)
     │
     ▼
-[Phase 6] AWS Serverless Setup (COMPLETED - Verified Locally)
+[Phase 6] AWS Serverless Setup (COMPLETED — Verified Locally; Cloud Deployment Deferred)
     │
     ▼
-[Phase 7] Weather Updates (Pending — Next Phase)
+[Phase 7] Weather Updates & Freshness Pipeline (COMPLETED)
     │
     ▼
-[Phase 7] Weather Updates (Short-Lived Current Cache + EventBridge ~30m Sync)
+[Phase 7.2] Final Stabilization / Performance & Abort Handling (COMPLETED)
     │
     ▼
-[Phase 8] Simple Weather Map (Leaflet Cloud & Precipitation Overlays)
+[Phase 8] Simple Weather & Cloud Map (COMPLETED)
     │
     ▼
-[Phase 9] Weather Chatbot (Simple Guardrail & Grounded Meteorological Advice)
+[Phase 9] Weather Chatbot (Simple Guardrail & Grounded Meteorological Advice — PENDING / NEXT)
     │
     ▼
-[Phase 10] Docker Containerization (Dockerfile & Image Verification — ONLY after local app works)
+[Phase 10] Docker Containerization (Dockerfile & Image Verification — PENDING / STRICTLY PHASE 10)
     │
     ▼
-[Phase 11] Cloudflare Edge & HTTPS (Simple DNS, Full Strict SSL, Asset CDN)
+[Phase 11] Cloudflare Edge & HTTPS (Simple DNS, Full Strict SSL, Asset CDN — PENDING)
     │
     ▼
-[Phase 12] Testing & Verification
+[Phase 12] Testing & Final Verification (PENDING)
 ```
 
 ---
@@ -174,7 +180,7 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 - **Goal**: Introduce a scalable multi-page navigation architecture without cluttering the existing working dashboard.
 - **Completed Deliverables**:
   - **Global Location Context (`src/context/LocationContext.tsx`)**: Created top-level React Context providing centralized access to `activeLocation`, `savedLocations`, geolocation trigger, manual selection, geocoding resolution, unit conversion (`units`, `setUnits`, `toggleUnits`), and global search modal controls.
-  - **Top Navigation Bar (`src/components/navigation/TopNav.tsx`)**: Responsive header with WeatherGPT Pro branding, categorized dropdown menus (Forecasts, Environment, Geohazards), direct Radar link, active location badge, reversible °C / °F toggle, mobile drawer, and one-handed mobile bottom dock.
+  - **Top Navigation Bar (`src/components/navigation/TopNav.tsx`)**: Responsive header with WeatherGPT branding, categorized dropdown menus (Forecasts, Environment, Geohazards), direct Radar link, active location badge, reversible °C / °F toggle, mobile drawer, and one-handed mobile bottom dock.
   - **Global Location Search Modal (`src/components/navigation/LocationSearchModal.tsx`)**: Allows searching cities, inputting coordinates, using device GPS, or selecting saved locations from any route.
   - **Multi-Page Route Architecture**: Created dedicated sub-routes (`/hourly`, `/forecast`, `/maps`, `/air-quality`, `/astronomy`, `/activities`, `/earthquakes`, `/volcanoes`, `/alerts`, `/storms`, and `/nowcast`) synchronized with `activeLocation`.
   - **Dashboard Preservation**: Existing dashboard at `/` remains 100% intact with live weather, automatic 10-minute refresh, interactive Leaflet map, hourly timeline, 7-day outlook, location disambiguation, saved pills, and assistant chatbot.
@@ -262,25 +268,119 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 
 ---
 
+### Phase 7.2: Final Stabilization / Performance & Abort Handling
+- **Status**: **Completed**
+- **Goal**: Harden concurrent request deduplication, caller cancellation isolation (`AbortController`), loading state stability, and non-destructive error resilience to ensure rock-solid production-grade reliability across rapid route transitions, tab visibility events, and simulated network interruptions.
+- **Completed Deliverables**:
+  - **Caller Cancellation Isolation**:
+    - Decoupled individual caller `AbortSignal`s via `attachAbortSignal()` in `src/lib/weatherService.ts`.
+    - When a caller aborts (e.g. React StrictMode unmount, rapid tab switch, or navigation), the underlying wire request to Open-Meteo continues in-flight for concurrent callers without throwing an unhandled `AbortError`.
+    - Verified that concurrent callers resolve valid data and the memory cache populates cleanly for instantaneous subsequent retrieval (< 20ms).
+  - **Rapid Location Switching & In-Flight Cleanup**:
+    - Safely prunes the `inFlightRequests` Map registry upon request completion or failure.
+    - Tested rapid location switches (e.g. Kolkata -> London -> Kolkata) ensuring previous aborted promises do not corrupt subsequent active fetches.
+  - **Loading-State Stabilization & Non-Destructive Refresh**:
+    - Enforced strict separation between initial data load (`!data` rendering skeletons) and subsequent background or manual refreshes (`isRefreshing` indicator).
+    - Completely eliminated skeleton flashing during manual and auto refreshes across `CurrentWeatherCard`, `HourlyForecastList`, and `DailyForecastList`.
+  - **Stale-While-Revalidate Error Fallback**:
+    - If external provider queries fail during non-forced refreshes, gracefully falls back to cached observation data with `isStale: true` for up to 24 hours (`STALE_FALLBACK_MAX_AGE_MS = 86400000`) rather than destroying rendered UI.
+  - **Comprehensive Verification Suites**:
+    - Added `src/tests/freshnessBugInvestigation.test.ts` (8 regression tests covering refresh timestamp advancement, 10-minute cadence, stale clearing, visibility toggles, and metadata calculation).
+    - Added `src/tests/inFlightAbortRegression.test.ts` (3 regression tests validating abort isolation, cache population after isolated abort, and rapid sequential location switching).
+    - Expanded test baseline to **68 / 68 automated tests passing across 10 test suites**.
+    - Passed **0 TypeScript errors**, **0 ESLint errors/warnings**, and successful Next.js production build (`next build` generates 16 routes cleanly).
+  - **Deployment Boundary Adherence**:
+    - AWS cloud deployment remains strictly deferred / unprovisioned.
+    - Docker containerization remains strictly deferred to Phase 10.
+    - Cloudflare remains a future deployment target.
+
+---
+
 ### Phase 8: Simple Weather & Cloud Map
-- **Status**: Pending
+- **Status**: **Completed**
+- **Goal**: Integrate spatial visualization with OpenStreetMap, active-location coordinates and GPS accuracy, live RainViewer Doppler precipitation radar, and Open-Meteo cloud cover metrics into the existing map without disrupting core weather features.
+- **Completed Deliverables**:
+  - **Core Data Enrichment (`src/lib/weatherService.ts`)**:
+    - Added `cloud_cover` parameter to Open-Meteo REST query (`current=...,cloud_cover`).
+    - Normalized into typed `CurrentWeather.cloudCover` (number 0–100%).
+    - Preserved 5-minute in-memory caching and tiered freshness guarantees.
+  - **Keyless RainViewer Doppler Radar Service (`src/lib/rainViewerService.ts`)**:
+    - Queries RainViewer API v2 `/v2/index.json` to extract latest radar observation timestamps and tile paths without API keys.
+    - Caches metadata for 5 minutes with in-flight request deduplication.
+    - Implemented safe stale fallback and request timeout protection via `AbortSignal`.
+    - Constructs standard Leaflet tile URL templates (`{z}/{x}/{y}`).
+    - Configured standard GIS zoom constraints (`maxNativeZoom: 7`, `maxZoom: 18`) to allow smooth client-side tile upscaling without 404 tile errors.
+  - **Map UI Integration (`WeatherMap.tsx`, `WeatherMapInternal.tsx`)**:
+    - Standard OpenStreetMap base tile layer dynamically synchronized with `activeLocation`.
+    - Active location marker with accuracy circle (`L.circle`) for device geolocation.
+    - User-facing "📡 Radar: ON / OFF" toggle button with loading spinner, pulsing active indicator, and error isolation.
+    - Attached/detached RainViewer Doppler radar tile layer with version-tracked race-condition protection.
+    - Added floating Cloud Cover & Weather Status HUD (bottom-left) rendering percentage and condition descriptions.
+  - **Radar Button / Leaflet Zoom Overlap Corrective Patch**:
+    - Repositioned top control bar to `top-2.5 left-14 right-2.5 gap-2`, providing a clean 12px separation from Leaflet's native `+` / `−` zoom controls (`left: 10px..44px`).
+    - Both controls remain 100% accessible, unobstructed, and clickable across desktop and mobile viewports.
+  - **Multi-Instance Support**:
+    - Active across both Dashboard map (`src/app/page.tsx`, `h-72`) and dedicated maps page (`src/app/maps/page.tsx`, `h-[500px]`).
+  - **Automated Verification**:
+    - Dedicated test suites `src/tests/rainViewerService.test.ts` (9/9 tests) and `src/tests/mapUiIntegration.test.ts` (9/9 tests).
+    - Expanded full automated test baseline to **85 / 85 tests passing across 12 test suites**.
+    - Passed **0 TypeScript errors**, **0 ESLint errors/warnings**, and clean Next.js production build (`next build`).
 
 ---
 
 ### Phase 9: Weather Chatbot
-- **Status**: Pending
+- **Status**: **Pending (Next Feature Milestone)**
+- **Current State**: **Partially Implemented (Architectural Stub & UI Preview)**
+  - **Frontend UI (`src/components/chatbot/WeatherAssistant.tsx`)**: Rendered on the main dashboard with chat bubble styling, location-aware welcome message (`"Hello! I'm your Weather Assistant. Ask me anything about current weather in {locationName}..."`), input validation, and preview response.
+  - **Chat Models (`src/types/chat.ts`)**: Defines `ChatMessage` (`id`, `sender`, `text`, `timestamp`, `isOffTopic`).
+  - **GraphQL Contract (`src/graphql/schema/typeDefs.ts`)**: Defines `askWeatherAssistant(message: String!, coordinates: CoordinatesInput): ChatResponse!` and `ChatResponse { reply: String!, isOffTopic: Boolean! }`.
+  - **GraphQL Client Operation (`src/graphql/client/operations.ts`)**: Defines `ASK_WEATHER_ASSISTANT_MUTATION`.
+  - **GraphQL Resolver Stub (`src/graphql/resolvers/weatherResolvers.ts`)**: Validates message input and returns preview stub.
+  - **Backend Lambda Foundation**: AWS Lambda handlers in `backend/` are fully compatible with this GraphQL contract.
+- **Phase 9 Scope to Complete**:
+  - **Client-to-Backend Wiring**: Connect `WeatherAssistant.tsx` to execute `ASK_WEATHER_ASSISTANT_MUTATION` over `/api/graphql` instead of local mock state.
+  - **Server-Side Meteorological Context Grounding**: Resolve `coordinates` inside the GraphQL resolver using `weatherService.fetchWeatherData(lat, lon)` (sub-millisecond in-memory cache hit) to inject live temperature, condition, humidity, and wind into the AI prompt.
+  - **Server-Side Weather-Only Guardrail**: Enforce strict meteorological domain boundaries in the backend system prompt, returning `isOffTopic: true` and polite refusal for non-weather topics.
+  - **LLM Provider Integration**: Connect GraphQL resolver to an LLM provider using the server-side `LLM_API_KEY` contract (provider selection not yet finalized; Gemini, OpenAI, or Anthropic remain viable implementation options).
+  - **Offline Deterministic Verification**: Create unit tests mocking the LLM API to validate weather grounding and guardrail refusal without consuming live API tokens.
 
 ---
 
 ### Phase 10: Docker Containerization
-- **Status**: Pending (Strictly deferred to Phase 10)
+- **Status**: **Pending (Strictly Deferred to Phase 10)**
+- **Goal**: Create and verify production multi-stage `Dockerfile.frontend` generating a standalone Next.js container image.
+- **Scope Boundary**: Containerization is an **infrastructure milestone**. Product features (e.g. activities, hazards, alerts) must NOT be merged into Phase 10.
 
 ---
 
 ### Phase 11: Cloudflare Edge & HTTPS
-- **Status**: Pending
+- **Status**: **Pending (Target Infrastructure Milestone)**
+- **Goal**: Configure DNS management, Full (Strict) SSL termination, and static asset edge CDN caching.
+- **Scope Boundary**: Cloudflare is an **infrastructure milestone**. Product features (e.g. alerts) must NOT be merged into Phase 11.
 
 ---
 
 ### Phase 12: Testing & Final Verification
-- **Status**: Pending
+- **Status**: **Pending (Release Gate)**
+- **Goal**: Execute full-stack end-to-end testing, responsive design audits, cross-browser validation, and release readiness sign-off.
+- **Scope Boundary**: Release verification gate. New product features (e.g. nowcasts, storms) must NOT be merged into Phase 12.
+
+---
+
+## Placeholder Routes & Scope Clarification
+
+During **Step 1 (Navigation Shell & Global Location Context)**, the navigation header (`TopNav.tsx`) and 8 sub-routes were created to establish a multi-page shell. Their current implementation status is:
+
+| Route | UI Title | Stated Data Source | Current Code Status | Canonical Classification |
+| :--- | :--- | :--- | :--- | :--- |
+| **`/earthquakes`** | Global Earthquake Tracker | USGS GeoJSON Feed | Static UI card with dummy metrics; no fetcher | **UI Placeholder / Future Expansion** |
+| **`/volcanoes`** | Volcano Activity & Eruptions | Smithsonian GVP / USGS | Static UI card with dummy metrics; no fetcher | **UI Placeholder / Future Expansion** |
+| **`/activities`** | Weather Activities & Lifestyle | Multi-variable comfort rules | Static UI card with dummy sports; no scoring engine | **UI Placeholder / Future Feature** |
+| **`/alerts`** | Severe Weather Alerts | US NWS / Meteoalarm / GDACS | Static UI card with placeholder banner; no API | **UI Placeholder / Future Feature** |
+| **`/nowcast`** | Precipitation Nowcast | Open-Meteo `minutely_15` | Static UI card with dummy intervals; no fetcher | **UI Placeholder / Future Feature** |
+| **`/storms`** | Tropical Cyclone & Hurricane | NOAA NHC / JTWC GIS | Static UI card with dummy categories; no GIS parser | **UI Placeholder / Future Feature** |
+| **`/air-quality`**| Air Quality & Environment | Open-Meteo Air Quality | Static UI card with dummy AQI scales; no fetcher | **UI Placeholder / Future Feature** |
+| **`/astronomy`** | Sun & Moon Astronomy | Open-Meteo / SunCalc | Static UI card with dummy sun/moon items; no fetcher | **UI Placeholder / Future Feature** |
+
+> **Notice on Legacy UI Badges**:
+> The current placeholder pages contain legacy "Phase 9/10/11/12 Roadmap" badges drafted during Step 1 UI prototyping. These labels do **not** represent the canonical implementation roadmap. The canonical roadmap reserves Phase 9 for the Weather Chatbot and Phases 10–12 for infrastructure, containerization, edge deployment, and release verification. These conflicting UI badges will be reconciled in a separate UI cleanup step.

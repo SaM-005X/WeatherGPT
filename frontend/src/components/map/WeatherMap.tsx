@@ -11,6 +11,9 @@ interface WeatherMapProps {
   accuracy?: number;
   source?: 'device' | 'manual';
   className?: string;
+  cloudCover?: number;
+  conditionDescription?: string;
+  condition?: string;
 }
 
 // Dynamically import Leaflet component with SSR disabled
@@ -33,6 +36,9 @@ export function WeatherMap({
   accuracy,
   source = 'manual',
   className = 'h-72 w-full',
+  cloudCover,
+  conditionDescription,
+  condition,
 }: WeatherMapProps) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 shadow-xs">
@@ -54,6 +60,9 @@ export function WeatherMap({
           locationName={locationName}
           accuracy={accuracy}
           source={source}
+          cloudCover={cloudCover}
+          conditionDescription={conditionDescription}
+          condition={condition}
         />
       </div>
     </section>

@@ -1,4 +1,4 @@
-# Simple Weather Web Application — AWS Serverless Infrastructure
+# WeatherGPT — AWS Serverless Infrastructure
 
 ## 1. AWS Services Matrix
 
