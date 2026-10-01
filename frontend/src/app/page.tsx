@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { WeatherReport } from '@/types/weather';
-import { fetchWeatherData, getCacheStatus } from '@/lib/weatherService';
+import { getCacheStatus } from '@/lib/weatherService';
+import { fetchWeatherByCoordinates } from '@/lib/api/graphqlClient';
 import { useLocationContext } from '@/context/LocationContext';
 
 import { LocationSection } from '@/components/location/LocationSection';
@@ -10,7 +11,7 @@ import { CurrentWeatherCard } from '@/components/weather/CurrentWeatherCard';
 import { WeatherMap } from '@/components/map/WeatherMap';
 import { HourlyForecastList } from '@/components/forecast/HourlyForecastList';
 import { DailyForecastList } from '@/components/forecast/DailyForecastList';
-import { WeatherAssistant } from '@/components/chatbot/WeatherAssistant';
+import { WeatherChat } from '@/components/WeatherChat';
 import { ErrorState } from '@/components/ui/ErrorState';
 
 const AUTO_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -59,7 +60,7 @@ export default function WeatherDashboardPage() {
       }
 
       try {
-        const data = await fetchWeatherData(activeLocation.latitude, activeLocation.longitude, {
+        const data = await fetchWeatherByCoordinates(activeLocation.latitude, activeLocation.longitude, {
           signal: controller.signal,
           forceRefresh: false,
         });
@@ -99,7 +100,7 @@ export default function WeatherDashboardPage() {
     setRefreshNotice(null);
 
     try {
-      const data = await fetchWeatherData(activeLocation.latitude, activeLocation.longitude, {
+      const data = await fetchWeatherByCoordinates(activeLocation.latitude, activeLocation.longitude, {
         forceRefresh: true,
       });
       setWeatherData(data);
@@ -248,6 +249,8 @@ export default function WeatherDashboardPage() {
               locationName={activeLocation.name}
               accuracy={activeLocation.accuracy}
               source={activeLocation.source}
+              weatherData={weatherData}
+              isLoading={isWeatherLoadingEffective}
               cloudCover={weatherData?.current?.cloudCover}
               conditionDescription={weatherData?.current?.conditionDescription}
               condition={weatherData?.current?.condition}
@@ -269,8 +272,12 @@ export default function WeatherDashboardPage() {
           </>
         )}
 
-        {/* 6. Weather Assistant Chatbot */}
-        <WeatherAssistant locationName={activeLocation.name} />
+        {/* 6. Weather Chatbot */}
+        <WeatherChat
+          locationName={activeLocation.name}
+          weatherData={weatherData}
+          units={units}
+        />
 
       </main>
 

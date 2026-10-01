@@ -39,3 +39,6 @@ export async function fetchWeatherViaGraphQL(
   );
   return data.weatherByCoordinates;
 }
+
+export { fetchWeatherByCoordinates } from '@/lib/api/graphqlClient';
+

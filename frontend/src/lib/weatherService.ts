@@ -575,3 +575,306 @@ export async function fetchWeatherData(
   inFlightRequests.set(cacheKey, fetchPromise);
   return await attachAbortSignal(fetchPromise, options?.signal);
 }
+
+// ---------------------------------------------------------------------------
+// Open-Meteo 15-Minute Precipitation Nowcast Service
+// ---------------------------------------------------------------------------
+
+export type RainIntensityCategory = 'dry' | 'light' | 'moderate' | 'heavy' | 'violent';
+
+export interface OpenMeteoMinutely15 {
+  time: string[];
+  precipitation: number[];
+  precipitation_probability?: number[];
+  weather_code?: number[];
+}
+
+export interface OpenMeteoNowcastResponse {
+  latitude: number;
+  longitude: number;
+  utc_offset_seconds: number;
+  timezone: string;
+  timezone_abbreviation?: string;
+  minutely_15?: OpenMeteoMinutely15;
+}
+
+export interface NowcastStep {
+  timeIso: string;
+  timeFormatted: string; // e.g. "04:15 PM"
+  minutesFromNow: number; // e.g. 0, 15, 30, 45, 60, 75, 90, 105
+  precipitationMm: number; // mm in 15-min interval
+  precipitationRateMmH: number; // mm/h = precipitationMm * 4
+  probability: number; // 0 - 100%
+  weatherCode: number;
+  conditionDescription: string;
+  intensityCategory: RainIntensityCategory;
+}
+
+export interface PrecipitationNowcastReport {
+  latitude: number;
+  longitude: number;
+  timezone: string;
+  generatedAt: string;
+  horizonMinutes: number; // 120
+  currentIntensityMmH: number;
+  currentIntensityCategory: RainIntensityCategory;
+  maxProbability: number;
+  totalExpectedPrecipitationMm: number;
+  willRain: boolean;
+  expectedRainStartMinutes: number | null;
+  summaryMessage: string;
+  steps: NowcastStep[];
+  isCached: boolean;
+  isStale: boolean;
+}
+
+export const NOWCAST_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export interface NowcastCacheEntry {
+  key: string;
+  timestamp: number;
+  data: PrecipitationNowcastReport;
+}
+
+const nowcastMemoryCache = new Map<string, NowcastCacheEntry>();
+const nowcastInFlightRequests = new Map<string, Promise<PrecipitationNowcastReport>>();
+
+/**
+ * Builds the URL for Open-Meteo 15-minute precipitation nowcast.
+ * Requests 8 steps of 15 minutes = next 120 minutes.
+ */
+export function buildNowcastUrl(latitude: number, longitude: number): string {
+  validateCoordinates(latitude, longitude);
+
+  const url = new URL('https://api.open-meteo.com/v1/forecast');
+  url.searchParams.set('latitude', latitude.toString());
+  url.searchParams.set('longitude', longitude.toString());
+  url.searchParams.set('minutely_15', 'precipitation,precipitation_probability,weather_code');
+  url.searchParams.set('forecast_minutely_15', '8');
+  url.searchParams.set('timezone', 'auto');
+
+  return url.toString();
+}
+
+/**
+ * Classifies precipitation intensity into standard meteorological categories:
+ * - dry: <= 0.05 mm/h
+ * - light: 0.05 - 2.5 mm/h
+ * - moderate: 2.5 - 10.0 mm/h
+ * - heavy: 10.0 - 50.0 mm/h
+ * - violent: >= 50.0 mm/h
+ */
+export function classifyRainIntensity(rateMmH: number): RainIntensityCategory {
+  if (rateMmH <= 0.05) return 'dry';
+  if (rateMmH < 2.5) return 'light';
+  if (rateMmH < 10.0) return 'moderate';
+  if (rateMmH < 50.0) return 'heavy';
+  return 'violent';
+}
+
+/**
+ * Normalizes Open-Meteo minutely_15 precipitation response into PrecipitationNowcastReport.
+ */
+export function normalizeNowcastResponse(
+  data: unknown,
+  fallbackLat = 0,
+  fallbackLon = 0,
+  now = Date.now()
+): PrecipitationNowcastReport {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Malformed Open-Meteo nowcast response: Body must be an object.');
+  }
+
+  const res = data as Partial<OpenMeteoNowcastResponse>;
+  const latitude = typeof res.latitude === 'number' ? res.latitude : fallbackLat;
+  const longitude = typeof res.longitude === 'number' ? res.longitude : fallbackLon;
+  const timezone = typeof res.timezone === 'string' ? res.timezone : 'UTC';
+  const minutely = res.minutely_15;
+
+  const times = Array.isArray(minutely?.time) ? minutely!.time : [];
+  const precipitations = Array.isArray(minutely?.precipitation) ? minutely!.precipitation : [];
+  const probabilities = Array.isArray(minutely?.precipitation_probability) ? minutely!.precipitation_probability : [];
+  const weatherCodes = Array.isArray(minutely?.weather_code) ? minutely!.weather_code : [];
+
+  const stepCount = Math.min(times.length, 8);
+  const steps: NowcastStep[] = [];
+
+  for (let i = 0; i < stepCount; i++) {
+    const timeStr = times[i];
+    let timeIso: string;
+    try {
+      timeIso = calculateObservationIso(timeStr, res.utc_offset_seconds);
+    } catch {
+      timeIso = new Date(now + i * 15 * 60 * 1000).toISOString();
+    }
+
+    // Format local time e.g., "04:15 PM"
+    let timeFormatted: string;
+    try {
+      timeFormatted = new Date(timeIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      timeFormatted = timeStr || `${i * 15}m`;
+    }
+
+    const precipitationMm = Math.max(0, Number(precipitations[i] ?? 0));
+    // 15-minute interval = 0.25 hour -> hourly rate = mm * 4
+    const precipitationRateMmH = Math.round(precipitationMm * 4 * 100) / 100;
+    const probability = Math.max(0, Math.min(100, Math.round(Number(probabilities[i] ?? 0))));
+    const weatherCode = Number(weatherCodes[i] ?? 0);
+    const conditionDescription = mapWmoCode(weatherCode).description;
+    const intensityCategory = classifyRainIntensity(precipitationRateMmH);
+
+    steps.push({
+      timeIso,
+      timeFormatted,
+      minutesFromNow: i * 15,
+      precipitationMm,
+      precipitationRateMmH,
+      probability,
+      weatherCode,
+      conditionDescription,
+      intensityCategory,
+    });
+  }
+
+  const totalExpectedPrecipitationMm = Math.round(
+    steps.reduce((acc, step) => acc + step.precipitationMm, 0) * 100
+  ) / 100;
+
+  const maxProbability = steps.length > 0
+    ? Math.max(...steps.map((s) => s.probability))
+    : 0;
+
+  const currentIntensityMmH = steps[0]?.precipitationRateMmH ?? 0;
+  const currentIntensityCategory = steps[0]?.intensityCategory ?? 'dry';
+
+  const willRain = steps.some((s) => s.intensityCategory !== 'dry' || s.precipitationMm > 0.05);
+
+  let expectedRainStartMinutes: number | null = null;
+  if (willRain) {
+    const rainStep = steps.find((s) => s.intensityCategory !== 'dry' || s.precipitationMm > 0.05);
+    expectedRainStartMinutes = rainStep ? rainStep.minutesFromNow : 0;
+  }
+
+  let summaryMessage = 'Dry conditions expected for the next 120 minutes.';
+  if (willRain) {
+    if (expectedRainStartMinutes === 0) {
+      summaryMessage = `Precipitation active now (${currentIntensityCategory}, ~${currentIntensityMmH} mm/h). Total expected: ${totalExpectedPrecipitationMm} mm.`;
+    } else {
+      const startStep = steps.find((s) => s.minutesFromNow === expectedRainStartMinutes);
+      const intensity = startStep?.intensityCategory ?? 'light';
+      summaryMessage = `Rain expected to start in ~${expectedRainStartMinutes} min (${intensity} intensity). Max rain probability: ${maxProbability}%.`;
+    }
+  }
+
+  return {
+    latitude,
+    longitude,
+    timezone,
+    generatedAt: new Date(now).toISOString(),
+    horizonMinutes: 120,
+    currentIntensityMmH,
+    currentIntensityCategory,
+    maxProbability,
+    totalExpectedPrecipitationMm,
+    willRain,
+    expectedRainStartMinutes,
+    summaryMessage,
+    steps,
+    isCached: false,
+    isStale: false,
+  };
+}
+
+/**
+ * Fetches 15-minute precipitation nowcast for coordinates with 5-minute cache and deduplication.
+ */
+export async function fetchPrecipitationNowcast(
+  latitude: number,
+  longitude: number,
+  options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+    allowStaleFallback?: boolean;
+    fetchFn?: typeof fetch;
+  }
+): Promise<PrecipitationNowcastReport> {
+  validateCoordinates(latitude, longitude);
+
+  const cacheKey = `nowcast:${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+  const now = Date.now();
+  const cached = nowcastMemoryCache.get(cacheKey);
+
+  // 1. Fresh Cache Hit
+  if (!options?.forceRefresh && cached) {
+    if (now - cached.timestamp < NOWCAST_CACHE_TTL_MS) {
+      return {
+        ...cached.data,
+        isCached: true,
+        isStale: false,
+      };
+    }
+  }
+
+  // 2. In-Flight Request Deduplication
+  if (nowcastInFlightRequests.has(cacheKey)) {
+    const inFlight = nowcastInFlightRequests.get(cacheKey)!;
+    return await attachAbortSignal(inFlight, options?.signal);
+  }
+
+  // 3. Network Fetch
+  const customFetch = options?.fetchFn ?? fetch;
+  const fetchPromise = (async (): Promise<PrecipitationNowcastReport> => {
+    try {
+      const url = buildNowcastUrl(latitude, longitude);
+      const res = await customFetch(url, {
+        signal: options?.signal,
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Open-Meteo Nowcast API error: ${res.status} ${res.statusText}`);
+      }
+
+      const json = await res.json();
+      const report = normalizeNowcastResponse(json, latitude, longitude, Date.now());
+
+      nowcastMemoryCache.set(cacheKey, {
+        key: cacheKey,
+        timestamp: Date.now(),
+        data: report,
+      });
+
+      return {
+        ...report,
+        isCached: false,
+        isStale: false,
+      };
+    } catch (err: unknown) {
+      // 4. Stale Fallback
+      const allowFallback = options?.allowStaleFallback !== false;
+      if (allowFallback && cached) {
+        return {
+          ...cached.data,
+          isCached: true,
+          isStale: true,
+        };
+      }
+      throw err;
+    } finally {
+      nowcastInFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  nowcastInFlightRequests.set(cacheKey, fetchPromise);
+  return await attachAbortSignal(fetchPromise, options?.signal);
+}
+
+/**
+ * Clears the in-memory nowcast cache (useful for testing).
+ */
+export function clearNowcastCache(): void {
+  nowcastMemoryCache.clear();
+  nowcastInFlightRequests.clear();
+}
+

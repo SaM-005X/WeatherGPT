@@ -35,10 +35,19 @@ export class GraphQLClientError extends Error {
 }
 
 export function getGraphQLEndpoint(): string {
-  if (typeof window !== 'undefined') {
-    return process.env.NEXT_PUBLIC_GRAPHQL_ENDPOINT || '/api/graphql';
+  if (process.env.NEXT_PUBLIC_APPSYNC_GRAPHQL_URL) {
+    return process.env.NEXT_PUBLIC_APPSYNC_GRAPHQL_URL;
   }
-  return process.env.NEXT_PUBLIC_GRAPHQL_ENDPOINT || 'http://localhost:3000/api/graphql';
+  if (process.env.NEXT_PUBLIC_APPSYNC_ENDPOINT) {
+    return process.env.NEXT_PUBLIC_APPSYNC_ENDPOINT;
+  }
+  if (process.env.NEXT_PUBLIC_GRAPHQL_ENDPOINT) {
+    return process.env.NEXT_PUBLIC_GRAPHQL_ENDPOINT;
+  }
+  if (typeof window !== 'undefined') {
+    return '/api/graphql';
+  }
+  return 'http://localhost:3000/api/graphql';
 }
 
 export async function executeGraphQL<TData, TVariables = Record<string, unknown>>(
@@ -47,16 +56,20 @@ export async function executeGraphQL<TData, TVariables = Record<string, unknown>
   options?: GraphQLClientOptions
 ): Promise<TData> {
   const endpoint = options?.endpoint || getGraphQLEndpoint();
+  const apiKey = process.env.NEXT_PUBLIC_APPSYNC_API_KEY;
 
   let response: Response;
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...(apiKey ? { 'x-api-key': apiKey } : {}),
+      ...options?.headers,
+    };
+
     response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        ...options?.headers,
-      },
+      headers,
       body: JSON.stringify({
         query,
         variables,

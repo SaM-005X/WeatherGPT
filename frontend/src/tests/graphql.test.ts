@@ -61,6 +61,7 @@ async function runTests() {
           weatherCode
           condition
           conditionDescription
+          cloudCover
           recordedAt
         }
         hourly {
@@ -91,6 +92,7 @@ async function runTests() {
   assert.ok(typeof report.current.temperature === 'number', 'Current temperature must be a number.');
   assert.ok(typeof report.current.feelsLike === 'number', 'Feels-like must be a number.');
   assert.ok(typeof report.current.humidity === 'number', 'Humidity must be a number.');
+  assert.ok(report.current.cloudCover !== undefined, 'Cloud cover must be returned in GraphQL query.');
   assert.ok(report.current.condition, 'WeatherCondition must be defined.');
   assert.ok(Array.isArray(report.hourly) && report.hourly.length > 0, 'Hourly forecast array must not be empty.');
   assert.ok(Array.isArray(report.daily) && report.daily.length > 0, 'Daily forecast array must not be empty.');

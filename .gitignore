@@ -11,6 +11,7 @@ frontend/out/
 frontend/.env*
 backend/.env*
 !frontend/.env.example
+!backend/.env.example
 
 # OS / IDE
 .DS_Store

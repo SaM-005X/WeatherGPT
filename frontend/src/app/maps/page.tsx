@@ -2,13 +2,20 @@
 
 import React, { useEffect, useState } from 'react';
 import { useLocationContext } from '@/context/LocationContext';
-import { WeatherMap } from '@/components/map/WeatherMap';
+import { WeatherMap, MapStatusCards, type LayerState } from '@/components/map/WeatherMap';
 import { fetchWeatherData } from '@/lib/weatherService';
 import { CurrentWeather } from '@/types/weather';
 
 export default function MapsPage() {
   const { activeLocation, openLocationSearch } = useLocationContext();
   const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
+  const [activeLayers, setActiveLayers] = useState<LayerState>({
+    radar: false,
+    wind: false,
+    clouds: false,
+    satellite: false,
+    storms: false,
+  });
 
   useEffect(() => {
     let isSubscribed = true;
@@ -80,28 +87,12 @@ export default function MapsPage() {
           cloudCover={currentWeather?.cloudCover}
           conditionDescription={currentWeather?.conditionDescription}
           condition={currentWeather?.condition}
+          onLayerStateChange={setActiveLayers}
           className="h-[500px] w-full"
         />
 
-        {/* Map Layers Info */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-slate-100 text-xs">
-          <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
-            <span className="font-semibold text-slate-800">Base Map</span>
-            <p className="text-[11px] text-slate-500 mt-0.5">OpenStreetMap Standard</p>
-          </div>
-          <div className="rounded-lg bg-sky-50/70 p-2.5 border border-sky-200/80">
-            <span className="font-semibold text-sky-900">Doppler Radar</span>
-            <p className="text-[11px] text-sky-700 mt-0.5">RainViewer API v2 Live</p>
-          </div>
-          <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
-            <span className="font-semibold text-slate-800">Cloud Metric HUD</span>
-            <p className="text-[11px] text-slate-500 mt-0.5">Open-Meteo Synced</p>
-          </div>
-          <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80">
-            <span className="font-semibold text-slate-800">Geohazards</span>
-            <p className="text-[11px] text-slate-500 mt-0.5">USGS Seismic Ready</p>
-          </div>
-        </div>
+        {/* Cohesive Map Layers Status Bar */}
+        <MapStatusCards layers={activeLayers} />
       </div>
     </main>
   );

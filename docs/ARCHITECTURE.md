@@ -6,9 +6,9 @@
 2. **Single Source of Truth for Location**: The frontend maintains one active location state in `LocationContext` consumed by the header, navigation modal, location cards, map, and weather domain services.
 3. **Provider-Agnostic Domain Services**: `weatherService.ts` encapsulates meteorological requests and normalizes them into clean Celsius domain models. External weather providers use standard REST (Open-Meteo).
 4. **Deterministic In-Memory Caching & Freshness**: Tiered freshness windows (5m current, 30m hourly, 2h daily, 24h stale fallback) with in-flight request deduplication and non-destructive UI updates.
-5. **Clear Application Boundaries**: GraphQL is strictly the application's internal API layer at `/api/graphql`; the dashboard currently operates on direct `weatherService.ts` with zero disruption.
+5. **Clear Application Boundaries & Domain Service Ownership**: The active dashboard currently operates on direct `weatherService.ts` with zero disruption. GraphQL Yoga exists at `/api/graphql` for local execution and testing. AWS AppSync is the planned managed GraphQL transport for AWS production. Domain services (`weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`) remain the single source of truth for business logic; Lambda handlers act strictly as thin adapters.
 6. **Relational Persistence (Current Implementation)**: Supabase PostgreSQL stores user-selected locations (`public.locations`) and caches 30-day geocoding search queries (`public.geocoding_cache`) with Row Level Security.
-7. **Serverless on AWS (Local Foundation / Cloud Deployment Deferred)**: Serverless execution foundation (`backend/` with Lambda, API Gateway v2, EventBridge, CloudWatch) implemented and verified locally; actual cloud provisioning remains deferred.
+7. **Serverless on AWS (Local Foundation / AppSync IaC Canonicalization)**: The Phase 6 serverless foundation (`backend/` with Lambda, API Gateway v2, EventBridge, CloudWatch) was verified locally; actual cloud provisioning remains deferred. For Phase 8.5 AppSync, AWS SAM (`backend/template.yaml`) is the single canonical IaC definition, while `backend/serverless.yml` remains frozen at the Phase 6 foundation.
 8. **Focused Weather Chatbot (Partially Implemented Preview / Future Phase 9 AI)**: Simple weather-topic guardrail ensuring the assistant only answers weather questions using trusted data. The frontend UI preview and typed GraphQL contract stub exist today; real LLM integration and server-side guardrail enforcement are planned for Phase 9.
 9. **Interactive Mapping & Doppler Radar (Implemented in Phase 8)**: Keyless Leaflet mapping, live RainViewer Doppler radar tile overlay with lifecycle management, real-time Cloud Cover HUD, and multi-instance coordinate synchronization.
 
@@ -97,10 +97,100 @@ The location model (`src/types/location.ts`) is designed to map directly to futu
 
 ---
 
-## 3. End-to-End System Architecture (Target Full-Stack Architecture)
+## 3. End-to-End System Architecture
 
-> **Architectural Status Note**:
-> This diagram illustrates the complete target deployment topology. The **Frontend**, **Leaflet Map**, **RainViewer Doppler Radar**, **Cloud Cover HUD**, **Location System**, **weatherService**, and **Supabase Database (locations & geocoding_cache)** are fully implemented and verified. The **GraphQL Gateway** and **AWS Backend Foundation** are implemented and verified locally, while actual AWS cloud deployment, Cloudflare edge, and Phase 9+ AI modules remain future targets.
+### A. Current Implemented Architecture (Active Runtime)
+
+The active dashboard (`src/app/page.tsx`) currently queries meteorological data by calling `weatherService.ts` directly.
+
+```text
+Next.js Dashboard
+       │
+       ▼
+weatherService.ts (In-memory 5m cache, tiered freshness, deduplication)
+       │
+       ▼
+Open-Meteo REST API (https://api.open-meteo.com/v1/forecast)
+```
+
+**Key Characteristics of Current State:**
+- **Dashboard Data Transport**: Operates entirely on direct `weatherService.ts` with zero GraphQL runtime dependency.
+- **Local GraphQL Gateway**: A fully functional GraphQL Yoga engine exists at `/api/graphql` (`src/app/api/graphql/route.ts`). It reuses the same domain services and schema for schema/resolver testing and local development, but is not currently in the dashboard's render path.
+- **AWS Backend Foundation (Phase 6)**: The AWS Lambda and API Gateway v2 handlers (`backend/src/handlers/graphql.ts`, `sync.ts`) exist and have been tested offline/locally, but are **not deployed** to AWS.
+- **Persistent Data**: Supabase PostgreSQL is actively queried for saved locations (`public.locations`) and geocoding cache (`public.geocoding_cache`) using the public `anon` key.
+- **Radar & Geospatial**: Interactive Leaflet maps (`WeatherMap.tsx`, `/maps`) query RainViewer Doppler radar tiles and Open-Meteo cloud cover directly.
+
+---
+
+### B. Future Local GraphQL Architecture (Target Local Development)
+
+During Phase 8.5.8, the frontend client will be wired to consume GraphQL via `weatherAdapter.ts` and `graphqlClient.ts`. In local development, requests route to the Next.js App Router GraphQL Yoga route:
+
+```text
+Next.js Dashboard
+       │
+       ▼
+weatherAdapter.ts (Drop-in adapter matching fetchWeatherData signature)
+       │
+       ▼
+graphqlClient.ts (Lightweight typed fetch-based client)
+       │
+       ▼
+GraphQL Yoga Gateway (/api/graphql)
+       │
+       ▼
+weatherService.ts (Domain business logic & in-memory cache)
+       │
+       ▼
+Open-Meteo REST API
+```
+
+---
+
+### C. Future AWS AppSync Architecture (Target AWS Production)
+
+In production AWS deployment, AWS AppSync serves as the fully managed serverless GraphQL entry point:
+
+```text
+Next.js Dashboard (Static / Edge Deployed)
+       │
+       ▼
+weatherAdapter.ts
+       │
+       ▼
+graphqlClient.ts (Configured with AppSync HTTPS endpoint + x-api-key / IAM)
+       │
+       ▼
+AWS AppSync (Managed Serverless GraphQL Transport)
+       │
+       ├─────────────────────────────────┬─────────────────────────────────┐
+       ▼                                 ▼                                 ▼
+weatherFunction Lambda             locationFunction Lambda            assistantFunction Lambda
+(Thin Adapter: Node.js/ARM64)      (Thin Adapter: Node.js/ARM64)      (Thin Adapter — Phase 9)
+       │                                 │                                 │
+       ▼                                 ▼                                 ▼
+weatherService.ts                 geocodingService.ts                LLM Provider API
+(In-memory cache, deduplication)   locationPersistenceService.ts     (Grounded with live weather)
+       │                                 │
+       ▼                                 ▼
+Open-Meteo REST API               Open-Meteo Geocoding / Supabase
+```
+
+---
+
+### D. Domain Services Remain the Business Logic Layer
+
+A central architectural mandate of WeatherGPT is that **AppSync and Lambda handlers must NOT become the main business-logic layer**:
+- **Domain Service Authority**: `weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`, and `rainViewerService.ts` remain the single source of truth for all calculations, validations, caching rules, and external provider coordination.
+- **Thin Lambda Adapters**: Lambda functions act strictly as thin adapters:
+  1. Receive the AppSync resolver event (e.g., `event.arguments.coordinates`).
+  2. Invoke the corresponding domain service method.
+  3. Return the normalized domain model to AppSync.
+- **Transport Independence**: Business logic remains 100% testable and runnable offline without AWS, AppSync, or cloud connectivity.
+
+---
+
+### System Topology Diagram (Target Overview)
 
 ```mermaid
 flowchart TD
@@ -111,20 +201,27 @@ flowchart TD
         NextApp --> LocHook["LocationContext (Single Source of Truth)"]
         LocHook --> MapModule["Leaflet Map (Dynamic Sync + Radar + Cloud HUD — Implemented)"]
         NextApp --> ChatModule["Weather Assistant Drawer (Preview / Partial Impl — Phase 9 Target)"]
-        NextApp --> DirectWeather["Direct weatherService.ts (Active Dashboard)"]
-        NextApp --> GQLClient["GraphQL Adapter / Client (Verified Parity)"]
+        NextApp --> DirectWeather["Direct weatherService.ts (Active Dashboard Runtime)"]
+        NextApp --> GQLAdapter["GraphQL Client & weatherAdapter.ts (Phase 8.5.8 Target)"]
     end
 
-    subgraph AWSCloud["AWS Serverless Backend (Local IaC Verified; Cloud Deployment Deferred)"]
-        GQLClient -->|"POST /graphql (lat, lon)"| APIGW["API Gateway (HTTP API v2)"]
-        APIGW --> GQL_Lambda["GraphQL Lambda Handler (Node.js/TS)"]
-        
-        SecretsManager["AWS Secrets Manager / SSM"] -.->|"Runtime Secrets"| GQL_Lambda
-        CloudWatch["AWS CloudWatch"] <--|"Logs & Metrics"| GQL_Lambda
+    subgraph LocalDev["Local GraphQL Dev Gateway (Implemented)"]
+        GQLAdapter -.->|"Local: POST /api/graphql"| YogaGateway["Next.js GraphQL Yoga (/api/graphql)"]
+        YogaGateway --> DirectWeather
+    end
 
-        EventBridge["AWS EventBridge (~30m Scheduled Rule)"] --> Sync_Lambda["Forecast Sync Worker Lambda"]
-        SecretsManager -.->|"Runtime Secrets"| Sync_Lambda
-        CloudWatch <--|"Logs & Metrics"| Sync_Lambda
+    subgraph AWSCloud["AWS Production Architecture (Phase 8.5 Target — Not Deployed)"]
+        GQLAdapter -->|"Production: HTTPS POST"| AppSync["AWS AppSync (Managed GraphQL Transport)"]
+        
+        AppSync --> WeatherLambda["weatherFunction Lambda (Thin Adapter)"]
+        AppSync --> LocLambda["locationFunction Lambda (Thin Adapter)"]
+        AppSync -.->|"Phase 9"| ChatLambda["assistantFunction Lambda (Thin Adapter)"]
+
+        WeatherLambda --> DirectWeather
+        LocLambda --> LocServices["geocodingService.ts & locationPersistenceService.ts"]
+        
+        SSM["AWS SSM Parameter Store"] -.->|"Runtime Secrets"| WeatherLambda
+        CloudWatch["AWS CloudWatch"] <--|"Structured JSON Logs"| WeatherLambda
     end
 
     subgraph ExternalServices["External Providers"]
@@ -140,15 +237,9 @@ flowchart TD
     %% Data Flow Connections
     DirectWeather -->|"1. In-Memory Cache Check (< 1ms)"| DirectWeather
     DirectWeather -->|"2. If Miss/Stale: Fetch REST Weather"| WeatherAPI
-    
-    GQL_Lambda -->|"A. Delegate to weatherService.ts"| DirectWeather
-    GQL_Lambda -->|"B. Delegate to persistenceService.ts"| SupaDB
-    GQL_Lambda -->|"C. Return Typed GraphQL Response"| APIGW
-
-    Sync_Lambda -->|"I. Read Recent Locations"| SupaDB
-    Sync_Lambda -->|"II. Warm Weather Caches"| WeatherAPI
-
-    GQL_Lambda -.->|"Weather Guardrail (Phase 9)"| LLMProvider
+    LocServices --> SupaDB
+    LocServices --> WeatherAPI
+    ChatLambda -.->|"Weather Grounding (Phase 9)"| LLMProvider
     MapModule -.->|"Direct Radar Tile Layer (Implemented Phase 8)"| RainViewer
 ```
 
@@ -268,6 +359,7 @@ In Phase 3.1, a dedicated resolution layer was introduced to guarantee that sear
 - **Phase 7**: Completed (Weather Updates & Freshness Pipeline).
 - **Phase 7.2**: Completed (Final Stabilization / Performance & Abort Handling).
 - **Phase 8**: Completed (Simple Weather & Cloud Map — RainViewer Doppler Radar, Cloud Cover HUD, /maps, and Leaflet Sync).
+- **Phase 8.5**: In Progress / Planned (AWS AppSync Integration — Phase 8.5.1 & 8.5.1-C Completed; Phase 8.5.2 Current Documentation Synchronization; SAM canonical IaC; domain services retained as business logic).
 - **Phase 9**: Pending (Weather Chatbot — Next Feature Milestone: LLM integration, server-side weather grounding, and guardrail enforcement).
 
 ---
@@ -434,6 +526,15 @@ Next.js Frontend (or external client)
 6. **Local Development Autonomy**: AWS infrastructure is purely additive. Local development continues to run seamlessly via Next.js and `/api/graphql` without requiring AWS credentials or local AWS emulation.
 7. **Dashboard Preservation**: The active dashboard (`src/app/page.tsx`) intentionally remains connected directly to `weatherService.ts`. No premature migration to GraphQL or Lambda has been performed.
 
+### 8.1 Transition to AWS AppSync (Phase 8.5 Architecture)
+- **Managed GraphQL Transport**: While Phase 6 established an API Gateway v2 + GraphQL Yoga Lambda handler as a local serverless proof-of-concept, Phase 8.5 transitions the production AWS architecture to **AWS AppSync**.
+- **Single Canonical IaC**: `backend/template.yaml` (AWS SAM) is the single canonical IaC definition for AppSync and its data source Lambda functions. `backend/serverless.yml` remains frozen at the Phase 6 foundation and is not an active AppSync IaC source.
+- **Domain-Grouped Lambda Topology**: Rather than routing all GraphQL queries through a monolithic Yoga handler, AppSync delegates directly to domain-grouped Lambda functions:
+  - `weatherFunction`: Resolves `weatherByCoordinates` and `refreshWeather`.
+  - `locationFunction`: Resolves `searchLocations` and `savedLocations`.
+  - `assistantFunction`: Resolves `askWeatherAssistant` (Phase 9 only).
+- **Thin Adapters & Domain Ownership**: These Lambda functions are pure adapters; all meteorological math, tiered freshness, deduplication, and external network interactions remain inside `weatherService.ts`, `geocodingService.ts`, and `locationPersistenceService.ts`. AppSync and Lambda handlers must not duplicate or absorb domain business logic.
+
 ---
 
 ## 9. Weather Updates & Freshness Pipeline (Implemented in Phase 7)
@@ -592,7 +693,7 @@ Phase 8 enriches WeatherGPT with interactive geospatial visualization, real-time
 5. **Multi-Instance Support**:
    - Powers both the compact dashboard preview card (`src/components/map/WeatherMap.tsx`) and the dedicated full-page route (`src/app/maps/page.tsx`).
 6. **Quality & Verification Baseline**:
-   - Verified across **85 / 85 automated tests** spanning 12 test suites (including `rainViewerService.test.ts` and `mapUiIntegration.test.ts`).
+   - Verified across the **85-test Phase 8 baseline, now 86 core assertions after the map UI patch, with the main `npm test` command still executing only the original 68 tests across 10 suites (standalone verification scripts and newly added suites exist outside the standard `npm test` script)**.
    - Verified **0 TypeScript errors**, **0 ESLint errors/warnings**, and clean Next.js production build (`next build` generating 16 routes).
 
 ---
@@ -614,15 +715,174 @@ WeatherGPT includes a dedicated Weather Assistant component designed to provide 
 - **AWS Backend Compatibility**:
   - Reused in AWS Lambda (`backend/src/handlers/graphql.ts`) and configured with generic `LLM_API_KEY` secret parameter.
 
-### 2. Remaining Phase 9 Target Scope
-The Weather Assistant is **NOT** a completed AI chatbot. The following components will be implemented in Phase 9:
-- **LLM Provider Integration**: Connecting the server-side resolver to an LLM provider. (Note: The provider is **not yet finalized**; `LLM_API_KEY` remains a generic contract).
-- **Server-Side Meteorological Grounding**: Injecting verified current observations and forecast models directly into the prompt context.
-- **Server-Side Weather Guardrail**: Deterministic classifier ensuring the assistant rejects non-weather queries (`isOffTopic: true`).
-- **Frontend Mutation Dispatch**: Replacing the local preview handler with live GraphQL mutation calls.
-- **Secure Secret Provisioning**: Provisioning runtime API keys in SSM/Secrets Manager for production execution.
-- **Automated AI Tests**: Deterministic test suites validating guardrail rejection and grounded responses.
+---
 
+## 13. Radar Playback Timeline & Precipitation Nowcast Architecture (Stage 5 & 6)
 
+### 1. RainViewer Doppler Radar Playback System
+- **Provider**: RainViewer Public Weather Maps API v2 (`https://api.rainviewer.com/public/weather-maps.json`).
+- **Timeline Frame Sequencing (`src/lib/rainViewerService.ts`)**:
+  - Automatically parses past frames (`radar.past`) and future nowcast projections (`radar.nowcast`).
+  - Constructs Slippy Map tile URL templates: `{host}{path}/{size}/{z}/{x}/{y}/{colorScheme}/{options}.png`.
+  - Sets default frame to the latest recorded past observation (`currentFrameIndex = past.length - 1`).
+- **Interactive Leaflet Playback Controller (`WeatherMapInternal.tsx`)**:
+  - Floating playback controller dock docked on the map canvas.
+  - **Animation Loop**: 850ms cycle timer advancing sequential frames across past and nowcast observations.
+  - **Granular Navigation**: Frame scrubber range input and Step Backward (⏮️) / Step Forward (⏭️) controls.
+  - **Tile Swapping Performance**: Direct URL update via `tileLayer.setUrl()` prevents layer teardown latency and memory thrashing.
+  - **Opacity & Visibility**: Interactive slider (10% to 100%) and layer toggle (👁️ / 🙈) with seamless opacity transitions.
+  - **Lifecycle Cleanup**: Strict layer removal from Leaflet map and interval cancellation on unmount or radar deactivation.
+
+### 2. Open-Meteo 15-Minute Precipitation Nowcast (`/nowcast` Route)
+- **Provider**: Open-Meteo Forecast REST API (`minutely_15=precipitation,precipitation_probability,weather_code&forecast_minutely_15=8`).
+- **Modeling & Normalization (`src/lib/weatherService.ts`)**:
+  - Captures 8 discrete 15-minute intervals spanning a 120-minute horizon.
+  - Converts interval millimeters into hourly rate: `precipitationRateMmH = precipitationMm * 4`.
+  - Classifies meteorological intensity: `dry` (<=0.05 mm/h), `light` (0.05–2.5 mm/h), `moderate` (2.5–10 mm/h), `heavy` (10–50 mm/h), `violent` (>=50 mm/h).
+  - Calculates cumulative 2h volume, peak probability, and estimated precipitation start offset.
+- **Client Cache & Resilience**:
+  - In-memory 5-minute TTL cache (`NOWCAST_CACHE_TTL_MS`).
+  - In-flight request deduplication collapsing concurrent callers into one fetch.
+  - Stale fallback preserving cached projection on upstream network failures.
+- **User Interface (`src/app/nowcast/page.tsx`)**:
+  - 4 Key Summary Badges: Horizon (Next 120 Mins), Max Probability (%), Current Intensity (mm/h), 2h Total Volume (mm).
+  - Trajectory Banner: Contextual alert detailing precipitation timing.
+  - Responsive Bar Projection Chart: Color-coded bars proportional to intensity with hover value tooltips.
+  - Detailed 15-Minute Interval Table: Chronological breakdown with probability progress bars and WMO condition descriptions.
+
+---
+
+## 14. Wind Patterns, Cloud Cover & Satellite Imagery Layer Architecture (Stage 7 Implemented)
+
+Stage 7 extends the Leaflet map architecture with dedicated service abstractions, layer controls, and interactive HUD metrics for wind vector flow, cloud cover density, and open satellite imagery.
+
+```text
+[ activeLocation (lat, lon) ] ───► [ LocationContext ]
+             │
+             ├───► [ windService.ts ] ──► Open-Meteo REST API
+             │       - 16-point cardinal compass (degreesToCardinal)
+             │       - Beaufort scale 0–12 (getBeaufortScale)
+             │       - SVG vector arrow generation (generateWindArrowSvg)
+             │       - 5-minute cache & request deduplication
+             │
+             ├───► [ satelliteService.ts ]
+             │       - Esri World Imagery (High-res satellite tiles)
+             │       - NASA GIBS Terra TrueColor (Daily imagery browse)
+             │       - Keyless, open providers & explicit attribution
+             │
+             └───► [ WeatherMapInternal.tsx ]
+                     - Layer Control Bar (OSM, Radar, Wind, Cloud, Satellite)
+                     - Dynamic SVG Wind Direction Arrow at activeLocation
+                     - Wind & Cloud Metric HUD Badge
+                     - Toggleable Cloud & Satellite Overlays with Opacity Sliders
+                     - Memory-safe Leaflet TileLayer & Marker cleanup
+```
+
+### 1. Wind Service & Vector Marker Architecture (`src/lib/windService.ts`)
+- **Open-Meteo Wind Extraction**: Retrieves `wind_speed_10m`, `wind_direction_10m`, and `wind_gusts_10m` with 5-minute in-memory caching and deduplication.
+- **16-Point Cardinal Compass**: Maps 360° degrees to 16 cardinal points (`N`, `NNE`, `NE`, `ENE`, `E`, `ESE`, `SE`, `SSE`, `S`, `SSW`, `SW`, `WSW`, `W`, `WNW`, `NW`, `NNW`).
+- **Beaufort Scale Classification**: Converts km/h wind speeds to standard Beaufort scale numbers (0–12) with descriptive labels (e.g. `Light Breeze`, `Fresh Breeze`, `Gale`, `Hurricane`).
+- **SVG Wind Arrow Vector**: Generates crisp, inline rotated SVG vector arrows using Leaflet `L.divIcon` pointing in the direction of wind flow (`rotate(direction + 180deg)`).
+
+### 2. Open Satellite Imagery Service (`src/lib/satelliteService.ts`)
+- **Keyless Tile Providers**:
+  - **Esri World Imagery**: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` with `maxNativeZoom: 18` and Esri attribution.
+  - **NASA GIBS Terra TrueColor**: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg` with `maxNativeZoom: 9` and NASA EOSDIS GIBS attribution.
+- **Provider Switching & Opacity Control**: React map state supports smooth toggling, provider selection, and opacity adjustment (10%–100%).
+
+### 3. Combined Map Layer Switcher & HUD Controls (`WeatherMapInternal.tsx`)
+- **Top Control Bar**: Clean layer selector coexisting with Leaflet zoom buttons allowing users to toggle and combine:
+  - Base Map (OpenStreetMap)
+  - Doppler Radar (RainViewer with timeline controls)
+  - Wind HUD & Directional Vector Arrow
+  - Cloud Cover Overlay & Metric HUD
+  - Live Satellite Imagery (Esri / NASA)
+- **Memory Safety & Lifecycle**: Leaflet markers and tile layers are tracked in React refs (`windMarkerRef`, `satelliteLayerRef`, `cloudLayerRef`) and explicitly removed on toggle off or unmount to guarantee zero memory leaks.
+
+### 4. Stage 7.1 Map Polish & Dynamic Status Synchronization
+- **Live Cloud Overlay**: Powered by NASA GIBS MODIS Terra Cloud Fraction Day (`MODIS_Terra_Cloud_Fraction_Day`) with transparent background, smooth `setOpacity` transitions, and live indicator badge.
+- **Regional Wind Vector Grid**: Generates a 5x5 grid of streamline markers across visible map bounds with GPU-accelerated CSS flow/pulse animations matching wind speed; automatically refreshes on map `moveend`.
+- **Harmonized Status Cards**: Reusable `MapStatusCards` synchronized with active layer state (`LayerState`) across `/maps` and dashboard:
+  - Doppler Radar glows sky-blue when Doppler stream is playing.
+  - Cloud/Satellite card glows sky-blue when Cloud or Satellite layers are active.
+  - Idle cards retain clean neutral borders (`border-slate-200 bg-white/70`).
+
+---
+
+## 15. Severe Weather Alerts & Thunderstorm Tracking Architecture (Stage 8 Implemented)
+
+Stage 8 introduces full-spectrum severe weather advisory detection, convective thunderstorm tracking, map-based lightning visualization, and system-wide network timeout resilience.
+
+```text
+[ activeLocation (lat, lon) ] ───► [ LocationContext ]
+             │
+             ├───► [ alertsService.ts ]
+             │       ├── US Bounding Box: US NWS GeoJSON API (api.weather.gov/alerts/active)
+             │       └── Global / International: Open-Meteo Synoptic Severe Risk Derivation
+             │       - Normalized Alert Model (Extreme, Severe, Moderate, Minor)
+             │       - 5-Minute In-Memory Cache, In-Flight Deduplication & Stale Fallback
+             │
+             ├───► [ stormService.ts ] ──► Open-Meteo Hourly Forecast API
+             │       - WMO Convective Codes (95, 96, 99 thunderstorms; squalls, heavy showers)
+             │       - Lightning Potential Index (0–100) & Convective Risk (None, Moderate, High, Severe)
+             │       - Regional Storm Cell Cluster Synthesis (Bearing, Distance, Motion)
+             │       - 6-Hour Forward Convective Forecast Horizon
+             │
+             ├───► [ Leaflet WeatherMap (WeatherMapInternal.tsx) ]
+             │       - "⚡ Storms" Layer in Top-Left Switcher Bar
+             │       - Animated Flashing L.divIcon Storm / Lightning Markers
+             │       - Convective Cell Popups (Storm Type, Gusts, Rain Rate, Lightning Score)
+             │       - Point Metric HUD Storm Indicator
+             │       - Complete Ref Teardown & Marker Cleanup on Toggle Off
+             │
+             └───► [ Dedicated Pages ]
+                     ├── /alerts: Live Severity Cards, Red/Amber Alerts & Instructions Drawer
+                     └── /storms: Convective Gauge, Hazard Assessment & Safety Protocols
+```
+
+### 1. Resilience & Network Timeout Management
+- **RainViewer Doppler Radar Service (`src/lib/rainViewerService.ts`)**:
+  - `RAINVIEWER_DEFAULT_TIMEOUT_MS` increased from 5,000ms to 10,000ms (10 seconds) to accommodate high-latency mobile networks and satellite imagery fetch pipelines.
+  - Single-retry network fallback added: transient network failures automatically trigger an immediate second fetch before falling back to cached or empty radar timelines.
+- **AWS Serverless SAM Template (`backend/template.yaml`)**:
+  - Increased `WeatherFunction` execution timeout from 10s to 25s, mitigating Lambda cold starts and multi-hop API aggregation delays.
+
+### 2. Severe Weather Alerts Service (`src/lib/alertsService.ts`)
+- **Multi-Source Ingestion & Bounding Box Routing**:
+  - Automatically routes US coordinates (`3.0 <= lat <= 72.0` and `-179.0 <= lon <= -65.0`) to the US National Weather Service GeoJSON alerts endpoint (`https://api.weather.gov/alerts/active?point={lat},{lon}`) with explicit `User-Agent`.
+  - Routes non-US/international coordinates to Open-Meteo synoptic analysis, evaluating severe wind gusts (>70 km/h), torrential precipitation (>15 mm/h), extreme temperatures (>=40°C heat advisory, <=-15°C wind chill), and thunderstorm codes (WMO 95, 96, 99).
+- **Normalized Alert Schema**:
+  - `id`: Unique identifier string.
+  - `event`: Standardized headline or advisory title (e.g. `Severe Thunderstorm Warning`, `High Wind Advisory`).
+  - `severity`: Standard 4-tier meteorological severity (`Extreme`, `Severe`, `Moderate`, `Minor`).
+  - `urgency`: `Immediate`, `Expected`, `Future`, or `Past`.
+  - `headline` & `description`: Full descriptive summary of the meteorological hazard.
+  - `instruction`: Concrete civilian safety action directives (e.g. "Move to an interior room on the lowest floor").
+  - `effective` & `expires`: ISO 8601 timestamps.
+  - `areaDesc`: Affected geographical county, zone, or city.
+  - `source`: Meteorological authority source attribution.
+- **Client Cache & Tiered Resilience**:
+  - 5-minute memory cache (`ALERTS_CACHE_TTL_MS = 300_000`).
+  - In-flight request deduplication preventing concurrent duplicate fetches.
+  - Stale fallback preserving cached advisories if upstream network drops occur.
+
+### 3. Thunderstorm & Convective Tracking (`src/lib/stormService.ts`)
+- **Meteorological Convective Indicators**:
+  - WMO Convective Codes: 95 (Thunderstorm with rain/snow), 96 (Thunderstorm with slight hail), 99 (Thunderstorm with heavy hail), 80–82 (Heavy showers), 77 (Snow grains/ice pellets), 17/29 (Squalls, dust storms).
+  - Multi-factor Convective Score (0–100): Combines WMO code severity, peak gusts (km/h), precipitation intensity (mm/h), and CAPE proxy.
+  - Storm Risk Categorization: `None` (0–19), `Moderate` (20–49), `High` (50–84), `Severe` (85–100).
+- **Regional Storm Cell Modeling**:
+  - Dynamically synthesizes localized convective cells within a 15–50km radius with bearing, distance, estimated motion direction, and hazard rating.
+- **Hourly Convective Forecast**:
+  - Provides a 6-hour forward-looking convective probability and risk progression.
+
+### 4. Leaflet Map Lightning & Storm Layer (`WeatherMapInternal.tsx`)
+- **Map Control Integration**:
+  - Added `⚡ Storms` toggle to the persistent top-left layer switcher bar.
+- **Visual Representation**:
+  - Uses custom `L.divIcon` HTML markers with CSS `@keyframes storm-pulse` emitting expanding amber/yellow shockwaves and a glowing bolt icon.
+  - Interactive Leaflet popup displaying storm type, convective score, peak wind gusts, and precipitation risk.
+- **Safe Lifecycle Management**:
+  - Markers stored in `stormMarkersRef` and systematically removed on toggle off, location change, or component unmount.
 
 

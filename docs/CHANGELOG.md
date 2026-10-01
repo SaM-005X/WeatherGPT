@@ -5,6 +5,203 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-01 — Stage 8: Severe Weather Alerts, Thunderstorm Tracking & Service Resilience
+
+### Added & Enhanced
+- **Service Timeout Resilience & Single-Retry Fallback (`frontend/src/lib/rainViewerService.ts` & `backend/template.yaml`)**:
+  - Increased `RAINVIEWER_DEFAULT_TIMEOUT_MS` from 5,000ms to 10,000ms (10 seconds) to handle mobile and high-latency radar fetch requests.
+  - Implemented automatic 1-retry fallback on network drop before failing back to cached or empty radar timelines.
+  - Increased AWS SAM `WeatherFunction` execution timeout from 10s to 25s to absorb cold starts and multi-hop external API latency.
+- **Severe Weather Warnings & Alerts (`frontend/src/lib/alertsService.ts` & `/alerts` Page)**:
+  - Created `alertsService.ts` fetching active meteorological advisories using US NWS GeoJSON endpoint for US locations, and synoptic severe threshold heuristics via Open-Meteo for international/global locations.
+  - Standardized alerts into normalized 4-tier model: `Extreme`, `Severe`, `Moderate`, `Minor` with urgency, instructions, and validity intervals.
+  - Built live `/alerts` route (`frontend/src/app/alerts/page.tsx`) with color-coded advisory cards (Red for Extreme/Severe, Amber for Moderate, Green for No Active Advisories) and expandable civilian action drawers.
+  - Implemented 5-minute memory cache with in-flight deduplication and stale-while-revalidate fallback.
+- **Thunderstorm & Convective Tracking (`frontend/src/lib/stormService.ts` & `/storms` Page)**:
+  - Created `stormService.ts` evaluating WMO convective codes (95, 96, 99 thunderstorms; squalls, heavy showers) and convective gusts.
+  - Calculated multi-factor lightning potential score (0–100) and risk level (`None`, `Moderate`, `High`, `Severe`).
+  - Added synthetic regional convective cell cluster model (bearing, distance, hazard rating, and motion vector) within 15–50km.
+  - Built live `/storms` route (`frontend/src/app/storms/page.tsx`) with convective index gauge, metric breakdown, and thunderstorm safety protocols.
+- **Leaflet Map Lightning & Storm Visualization Layer (`WeatherMapInternal.tsx` & `WeatherMap.tsx`)**:
+  - Added toggleable `⚡ Storms` layer to the persistent top-left layer switcher bar.
+  - Rendered animated flashing `L.divIcon` markers over coordinates experiencing active convective conditions.
+  - Interactive Leaflet popup with storm classification, lightning score, wind gusts, and precipitation risk.
+  - Point Metric HUD storm indicator badge and complete memory-safe layer/marker cleanup on unmount or toggle off.
+- **Testing & Quality Assurance**:
+  - Created automated test suite `frontend/src/tests/alertsStorms.test.ts` (7/7 tests passed).
+  - Verified 0 ESLint errors/warnings (`npm run lint`), all 14 test suites passing (`npm test`), and clean Next.js production build (`npm run build`).
+
+---
+
+## [1.8.1] - 2026-09-30 — Stage 7.1: Map Polish — Live Cloud Tiles, Regional Wind Vector Grid & Status Card Synchronization
+
+### Added & Enhanced
+- **Real Cloud Tile Stream (`frontend/src/lib/rainViewerService.ts` & `WeatherMapInternal.tsx`)**:
+  - Wired the "Clouds" layer to mount real cloud formations using NASA GIBS MODIS Terra Cloud Fraction Day (`MODIS_Terra_Cloud_Fraction_Day`) with full alpha transparency.
+  - Added `buildSatelliteInfraredTileUrlTemplate` and `getCloudTileConfig` helpers in `rainViewerService.ts`.
+  - Added live NASA GIBS indicator to the Cloud Opacity control bar and smooth `setOpacity` without layer recreation.
+- **Regional Animated Wind Vector Grid (`frontend/src/lib/windService.ts` & `WeatherMapInternal.tsx`)**:
+  - Implemented `generateWindStreamlineSvg` with dual-layer rotation and GPU-accelerated CSS pulse/flow animation matching wind speed.
+  - Added a 5x5 regional grid of streamline markers spanning the visible map bounds around `activeLocation`, re-centering dynamically on map pan/zoom (`moveend`).
+  - Coexists with the central location badge pin; cleanly unmounts and clears all grid markers when Wind is toggled off.
+- **Synchronized Map Status Cards (`frontend/src/components/map/WeatherMap.tsx` & `maps/page.tsx`)**:
+  - Created reusable `MapStatusCards` with unified design hierarchy across Base Map, Doppler Radar, Cloud/Satellite Layer, and Geohazards.
+  - Lifted layer state (`LayerState`) via `onLayerStateChange` callback so bottom cards reflect active status dynamically:
+    - Doppler Radar card glows sky-blue when Doppler stream is playing.
+    - Cloud/Satellite card glows sky-blue when Cloud or Satellite layers are toggled on.
+    - Idle cards display clean neutral borders (`border-slate-200 bg-white/70`).
+- **Testing & Verification**:
+  - Expanded `frontend/src/tests/windSatelliteLayers.test.ts` to 8/8 tests.
+  - Verified 0 ESLint errors/warnings (`npm run lint`), all 13 test suites passing (`npm test`), and clean production build (`npm run build`).
+
+---
+
+## [1.8.0] - 2026-09-30 — Stage 7: Wind Patterns, Cloud Cover & Satellite Imagery Layers
+
+### Added & Enhanced
+- **Wind Speed, Direction & Vector Layer (`frontend/src/lib/windService.ts` & `WeatherMapInternal.tsx`)**:
+  - Created `windService.ts` for extracting wind speed (km/h & mph), gusts, and 360° direction angle.
+  - Implemented 16-point cardinal compass conversion (`degreesToCardinal`), Beaufort Scale classification (0–12), and unit conversions (`kmhToMph`, `kmhToKnots`).
+  - Added dynamic SVG wind direction vector marker rendered directly on the active location on Leaflet map.
+  - Integrated Wind HUD metrics (direction, velocity, peak gusts, Beaufort scale description) into map point metric badge.
+- **Cloud Cover Layer & Metric HUD Expansion (`WeatherMapInternal.tsx`)**:
+  - Expanded Cloud Metric HUD displaying cloud cover percentage, semantic cloud category (`Clear`, `Partly Cloudy`, `Mostly Cloudy`, `Overcast`), and estimated cloud base altitude.
+  - Added toggleable Cloud Cover visualization overlay with opacity control slider.
+- **Satellite Imagery Layer (`frontend/src/lib/satelliteService.ts` & `WeatherMapInternal.tsx`)**:
+  - Created `satelliteService.ts` supporting keyless, free, open satellite tile providers: **Esri World Imagery** and **NASA GIBS Terra TrueColor**.
+  - Configured provider selector, opacity slider (20% to 100%), and proper map attribution strings.
+- **Unified Map Layer Switcher Bar (`WeatherMapInternal.tsx`)**:
+  - Created top-left layer selection control bar allowing users to toggle and combine layers: Base Map (OpenStreetMap), Doppler Radar (RainViewer), Wind HUD & Vectors, Cloud Overlay, and Satellite Imagery.
+  - Co-exists gracefully with the RainViewer timeline playback dock and Leaflet zoom controls.
+- **Testing & Quality Assurance**:
+  - Created automated test suite `frontend/src/tests/windSatelliteLayers.test.ts` (7/7 tests passed).
+  - Verified 0 ESLint errors/warnings (`npm run lint`), all 13 test suites passing (`npm test`), and clean Next.js production build (`npm run build`).
+
+---
+
+## [1.7.0] - 2026-09-30 — Stage 5 & 6: Interactive RainViewer Radar & Open-Meteo Precipitation Nowcast
+
+### Added & Enhanced
+- **Interactive RainViewer Doppler Radar Playback (`frontend/src/lib/rainViewerService.ts` & `WeatherMapInternal.tsx`)**:
+  - Implemented multi-frame radar timeline parsing in `rainViewerService.ts`, capturing all available past frames (`radar.past`) and future nowcast frames (`radar.nowcast`) from RainViewer API v2.
+  - Added interactive radar playback dock to the Leaflet map:
+    - **Play / Pause** animation loop toggling with 850ms interval cadence.
+    - **Step Backward (⏮️) / Step Forward (⏭️)** buttons and range scrubber for granular 10-minute interval navigation.
+    - **Frame Timestamps & Badges**: Displays formatted local observation time, UTC timestamp, frame counter (`Frame X/Y`), and status indicator (`Past Radar` vs `Nowcast`).
+    - **Opacity Slider & Visibility Toggle**: Granular radar layer opacity control (10% to 100%) and instant show/hide layer toggle with zero timeline state loss.
+    - **Memory-Safe Layer Management**: Fast URL swapping via `tileLayer.setUrl()` to prevent tile layer thrashing, with complete layer and timer teardown on unmount or radar deactivation.
+- **Open-Meteo 15-Minute Precipitation Nowcast (`/nowcast` & `weatherService.ts`)**:
+  - Built `fetchPrecipitationNowcast` in `weatherService.ts` querying Open-Meteo's `minutely_15=precipitation,precipitation_probability,weather_code` for the next 120 minutes (8 steps of 15 min).
+  - Implemented meteorological intensity normalization (`classifyRainIntensity`) mapping to standard categories (`dry`, `light`, `moderate`, `heavy`, `violent`).
+  - Added in-memory 5-minute caching (`NOWCAST_CACHE_TTL_MS`), in-flight request deduplication, and stale fallback on network failure.
+  - Connected `/nowcast` route (`frontend/src/app/nowcast/page.tsx`) with live data:
+    - Summary Badges: Nowcast Horizon (Next 120 Mins), Peak Rain Probability (%), Current Intensity (mm/h), and 2h Cumulative Volume (mm).
+    - Trajectory Banner: Contextual summary indicating active rain or expected start window.
+    - Responsive Bar Chart: Visual projection across 8 intervals with color-coded intensity bars, value tooltips, and probability markers.
+    - Detailed 15-Minute Timeline Table: Complete breakdown of precipitation, rates, intensity category, and WMO condition descriptions.
+- **Testing & Verification**:
+  - Created comprehensive test suite `frontend/src/tests/radarNowcast.test.ts` (8/8 tests passed).
+  - Verified `rainViewerService.test.ts` (9/9 tests passed).
+  - Updated `package.json` with `test:radar` and integrated into the global `npm test` script.
+  - Verified 0 TypeScript errors, 0 ESLint warnings, all 12 test suites passing (85+ assertions), and clean Next.js production build (`next build` across 17 routes).
+
+---
+
+## [1.6.1] - 2026-09-30 — Phase 9.2: Weather Chatbot Bugfix & Markdown Rendering
+
+### Fixed & Improved
+- **Guardrail Pre-flight & Routing (`src/lib/weatherAssistant.ts`)**:
+  - Eliminated rigid negative-match pre-flight logic that caused false-positive refusals on spelling variations like `"whether"`.
+  - Added explicit allowances for greetings (`"hi"`, `"hello"`, `"good morning"`), weather inquiry terms (`"forecast"`, `"temperature"`, `"rain"`, `"umbrella"`), and active location mentions.
+  - Reserved pre-flight refusal strictly for blatant non-weather subjects (code requests, algebra, recipes, trivia, politics), letting the Gemini system instruction govern conversational queries naturally.
+- **Complete Grounded Fallback Sentences (`src/lib/weatherAssistant.ts`)**:
+  - Repaired template strings in `generateGroundedWeatherAdvice` to prevent incomplete or truncated sentences.
+  - Enhanced `"Best time for a walk"` with temperature-aware advice (morning/evening windows for heat, midday solar warming for chilly conditions, and rain alerts).
+  - Ensured every fallback branch outputs a complete, grammatically sound sentence with safe temperature fallbacks.
+- **Rich Markdown Chat UI (`src/components/WeatherChat.tsx`)**:
+  - Integrated `react-markdown` for rendering assistant message content.
+  - Supported bold text (`**`), bullet lists, and paragraphs with clean typography and spacing within the chat bubbles.
+- **Testing & Verification**:
+  - Verified live Next.js `/api/chat` route with `"what is the whether in kolkata?"`, `"Best time for a walk?"`, and `"Write a python function"`.
+  - Confirmed 0 TypeScript errors, 0 ESLint warnings, and clean Next.js production build (`next build`).
+
+---
+
+## [1.6.0] - 2026-09-30 — Phase 9: Weather Chatbot with Google Gemini & Prompt Guardrail
+
+### Added & Integrated
+- **Google Gemini Provider Integration (`@google/genai`)**:
+  - Integrated `gemini-2.5-flash` via the official `@google/genai` SDK in `src/lib/weatherAssistant.ts`.
+  - Simple, lightweight architecture: zero vector databases, embeddings, LangChain, or complex agent frameworks.
+  - Implemented exact prompt guardrail:
+    - `"You are a helpful, concise weather assistant for a weather app. You are provided with the active location's live weather data in JSON format: {weatherContext}..."`
+    - Standardized polite refusal for off-topic queries: `'I am your weather assistant and can only help with questions about the current weather, forecasts, and outdoor planning.'`.
+  - Built-in grounded deterministic fallback engine when `GEMINI_API_KEY` is missing or placeholder, ensuring the app never crashes.
+- **Next.js API Route (`src/app/api/chat/route.ts`)**:
+  - Created standard Route Handler (`POST /api/chat`) accepting conversation turns (last 4-6 max) and live `weatherContext`.
+  - Validates request payloads and returns typed `{ reply, isOffTopic, source }` JSON responses.
+- **Interactive Chat Panel UI (`src/components/WeatherChat.tsx`)**:
+  - Embedded into dashboard replacing previous card with an interactive chat panel.
+  - Added requested prompt chips: `"Do I need an umbrella today?"`, `"What should I wear?"`, `"Best time for a walk?"`.
+  - Input field with Enter-key submission and send button.
+  - Scrollable message history with auto-scroll and animated loading indicator.
+  - Dynamic injection of active location's live weather state (`locationName`, `temperature`, `feelsLike`, `condition`, `humidity`, `windSpeed`, `precipitation`, `cloudCover`, hourly & daily summaries).
+- **Environment & Configuration**:
+  - Added `GEMINI_API_KEY=` and `GEMINI_MODEL=gemini-2.5-flash` placeholders to `.env.example`.
+  - Confirmed `.env.local` is gitignored.
+- **Automated Verification Suite (`src/tests/weatherChatbot.test.ts`)**:
+  - 5/5 automated tests validating prompt formatting, on-topic grounded queries, off-topic rejection with exact refusal string, warm weather adaptation, and `/api/chat` Route Handler execution.
+  - Passed `npm run lint` with 0 errors and `npm run build` with 0 errors across 17 routes.
+
+---
+
+## [1.5.1] - 2026-09-30 — Phase 8.5.8: Frontend GraphQL Adapter Wiring & Live Backend Integration
+
+### Added & Integrated
+- **Environment Configuration**:
+  - Configured `frontend/.env.local` with live AppSync HTTPS endpoint (`NEXT_PUBLIC_APPSYNC_GRAPHQL_URL`) and browser token (`NEXT_PUBLIC_APPSYNC_API_KEY`).
+  - Updated `frontend/.env.example` with empty placeholder keys for reproducibility.
+  - Confirmed `.gitignore` excludes `.env.local` to prevent committing live tokens.
+- **Frontend GraphQL Client Module (`src/lib/api/graphqlClient.ts`)**:
+  - Implemented lightweight `fetchWeatherByCoordinates(lat, lon, options)` using native Web `fetch` (zero Apollo dependencies).
+  - Sends `Content-Type: application/json` and `x-api-key: process.env.NEXT_PUBLIC_APPSYNC_API_KEY`.
+  - Dispatches typed `WeatherByCoordinates` query requesting `current` observation, 24-hour `hourly` forecast, and 7-day `daily` projection.
+  - Normalizes GraphQL data into client `WeatherReport` model in Celsius.
+  - Built-in graceful fallback to direct `weatherService.ts` if cloud endpoint experiences transient network downtime.
+- **Dashboard UI Wiring (`src/app/page.tsx`)**:
+  - Replaced direct service calls with `fetchWeatherByCoordinates` in active location change lifecycle and refresh handler.
+  - Preserved loading skeletons (`isWeatherLoading`), non-destructive refresh indicators (`isRefreshing`), stale fallback notices (`refreshNotice`), and error boundaries.
+- **Local Verification & Automated Testing**:
+  - Created automated test suite `src/tests/appsyncFrontendClient.test.ts` (5/5 tests passing: live query execution, live refresh query, AbortSignal cancellation, descriptive error throwing, graceful domain fallback).
+  - Verified 0 TypeScript errors, 0 ESLint warnings, and clean Next.js production build (`next build`).
+  - Verified dev server (`http://localhost:3000`) HTTP 200 OK rendering.
+
+---
+
+## [1.5.0] - 2026-09-30 — Phase 8.5.7: AWS AppSync Cloud Deployment & Live Verification
+
+### Added & Deployed
+- **CloudFormation Stack Execution (`weather-gpt-backend`)**:
+  - Successfully executed CloudFormation change set `samcli-deploy1790757616` in region `us-east-1`.
+  - Stack reached **`CREATE_COMPLETE`** with all cloud resources successfully provisioned.
+- **AWS AppSync Managed GraphQL Service**:
+  - Deployed `WeatherAppSyncApi` (API ID: `lae4htbgzfbcvjnczbgzio3w6q`) with schema `WeatherAppSyncSchema`.
+  - Configured HTTPS GraphQL endpoint: `https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql`.
+  - Configured authentication modes: Public browser token `API_KEY` (`da2-***`, redacted) and `AWS_IAM`.
+- **Serverless Resolver & Background Worker Infrastructure**:
+  - Provisioned direct Lambda data source `WeatherLambdaDataSource` invoking `WeatherFunction` (Node.js 20.x, ARM64 architecture).
+  - Attached unit resolvers for `Query.weatherByCoordinates` and `Mutation.refreshWeather`.
+  - Provisioned `ForecastSyncFunction` with Amazon EventBridge scheduled rule `rate(30 minutes)` for automatic cache warming.
+- **End-to-End Live Verification**:
+  - Executed live test query against the provisioned AppSync HTTPS endpoint using the provisioned API Key:
+    - Queried coordinates: `{ latitude: 22.5726, longitude: 88.3639 }` (Kolkata).
+    - Status: **HTTP 200 OK**.
+    - Payload verified: Received valid temperature, weather code, wind speed, humidity, timezone (`Asia/Kolkata`), and timestamp with zero GraphQL errors.
+    - Verified that resolver successfully invokes `WeatherFunction`, calls upstream Open-Meteo REST API, and returns expected schema-conformant JSON.
+- **Documentation & Security**:
+  - Synchronized operational status in `docs/AWS.md` and `docs/CHANGELOG.md`.
+  - Ensured API key is redacted in committed documentation.
+
 ---
 
 ## [1.4.0] - 2026-09-29 — Phase 8: Simple Weather & Cloud Map

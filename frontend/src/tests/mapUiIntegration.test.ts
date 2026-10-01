@@ -104,8 +104,16 @@ async function testRadarFailureTolerance() {
 // ============================================================================
 console.log('\n[5/8] Testing Cloud Cover HUD Formatting...');
 
-function formatCloudCoverDisplay(cloudCover?: number): string {
+function formatCloudCoverDisplay(cloudCover?: number, isLoading = false): string {
+  if (isLoading) return 'skeleton';
   return typeof cloudCover === 'number' ? `${cloudCover}%` : 'Unavailable';
+}
+
+function resolveEffectiveCloudCover(
+  cloudCoverProp?: number,
+  weatherData?: { current?: { cloudCover?: number } } | null
+): number | undefined {
+  return cloudCoverProp ?? weatherData?.current?.cloudCover;
 }
 
 // Standard positive value
@@ -118,7 +126,17 @@ assert.strictEqual(formatCloudCoverDisplay(0), '0%');
 // Undefined value must format as 'Unavailable' (not '0%')
 assert.strictEqual(formatCloudCoverDisplay(undefined), 'Unavailable');
 
-console.log('✔ Cloud Cover HUD Formatting verified.');
+// When loading, must format as skeleton instead of 'Unavailable'
+assert.strictEqual(formatCloudCoverDisplay(undefined, true), 'skeleton');
+assert.strictEqual(formatCloudCoverDisplay(50, true), 'skeleton');
+
+// WeatherData prop synchronization contract
+const mockWeatherData = { current: { cloudCover: 25 } };
+assert.strictEqual(resolveEffectiveCloudCover(undefined, mockWeatherData), 25, 'Must resolve from weatherData when prop is omitted');
+assert.strictEqual(resolveEffectiveCloudCover(10, mockWeatherData), 10, 'Direct prop takes precedence if provided');
+assert.strictEqual(resolveEffectiveCloudCover(undefined, null), undefined);
+
+console.log('✔ Cloud Cover HUD Formatting and WeatherData Sync verified.');
 
 // ============================================================================
 // 6. Weather Condition Display Contract

@@ -60,6 +60,7 @@ export const typeDefs = /* GraphQL */ `
     uvIndex: Float
     pressure: Float
     visibility: Float
+    cloudCover: Int
     recordedAt: String!
     isCached: Boolean
   }

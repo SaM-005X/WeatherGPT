@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["es2022"],
+    "skipLibCheck": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["../frontend/src/*"]
+    },
+    "types": ["node"],
+    "noCheck": true,
+    "noEmit": true
+  },
+  "include": ["appsync.test.ts"]
+}

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: WeatherGPT Serverless Backend (API Gateway v2, Lambda, EventBridge, CloudWatch)
+Description: WeatherGPT Serverless Backend (AWS AppSync, Lambda, EventBridge, CloudWatch)
 
 Globals:
   Function:
@@ -31,48 +31,90 @@ Parameters:
     Description: Supabase Anon Key
 
 Resources:
-  WeatherHttpApi:
-    Type: AWS::Serverless::HttpApi
+  # ----------------------------------------------------------------------------
+  # AWS AppSync Managed GraphQL API Foundation (Phase 8.5 Canonical IaC)
+  # ----------------------------------------------------------------------------
+  WeatherAppSyncApi:
+    Type: AWS::AppSync::GraphQLApi
     Properties:
-      StageName: !Ref Stage
-      CorsConfiguration:
-        AllowOrigins:
-          - 'http://localhost:3000'
-          - '*'
-        AllowHeaders:
-          - Content-Type
-          - Authorization
-        AllowMethods:
-          - GET
-          - POST
-          - OPTIONS
+      Name: !Sub 'weather-gpt-api-${Stage}'
+      AuthenticationType: API_KEY
+      AdditionalAuthenticationProviders:
+        - AuthenticationType: AWS_IAM
+      XrayEnabled: false
 
-  GraphQLFunction:
+  WeatherAppSyncApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt WeatherAppSyncApi.ApiId
+      Description: !Sub 'WeatherGPT public browser client API key (${Stage})'
+      # CloudFormation defaults to 7 days expiration from creation when Expires is omitted.
+      # For longer pilot/development testing, rotate or set explicit epoch timestamp during deployment.
+
+  WeatherAppSyncSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt WeatherAppSyncApi.ApiId
+      DefinitionS3Location: ./schema.graphql
+
+  # IAM Service Role permitting AppSync to invoke backend Lambda resolver functions
+  AppSyncLambdaServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'weather-gpt-appsync-role-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AppSyncInvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt WeatherFunction.Arn
+                  - !Sub '${WeatherFunction.Arn}:*'
+
+  # Domain-Grouped Lambda Resolver: Weather Operations (Thin Adapter)
+  # Note: Handler implementation will be added in Phase 8.5.4
+  WeatherFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ./
-      Handler: dist/handlers/graphql.handler
-      Description: WeatherGPT GraphQL API Gateway Lambda Handler
-      Events:
-        GraphQLPost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref WeatherHttpApi
-            Path: /graphql
-            Method: post
-        GraphQLGet:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref WeatherHttpApi
-            Path: /graphql
-            Method: get
-        GraphQLOptions:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref WeatherHttpApi
-            Path: /graphql
-            Method: options
+      Handler: dist/handlers/appsync.handler
+      Description: WeatherGPT AppSync Lambda resolver for weather operations (weatherByCoordinates, refreshWeather)
+      Timeout: 25
 
+  # AppSync Direct Lambda Data Source for Weather Operations
+  WeatherLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt WeatherAppSyncApi.ApiId
+      Name: WeatherLambdaDataSource
+      Description: Lambda data source for weather domain operations (weatherFunction)
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt WeatherFunction.Arn
+
+  # Pilot Resolver: Query.weatherByCoordinates
+  WeatherByCoordinatesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: WeatherAppSyncSchema
+    Properties:
+      ApiId: !GetAtt WeatherAppSyncApi.ApiId
+      TypeName: Query
+      FieldName: weatherByCoordinates
+      DataSourceName: !GetAtt WeatherLambdaDataSource.Name
+
+  # ----------------------------------------------------------------------------
+  # Background Forecast Warming Worker (Phase 6 EventBridge Foundation)
+  # ----------------------------------------------------------------------------
   ForecastSyncFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -90,6 +132,14 @@ Resources:
             Enabled: true
 
 Outputs:
-  ApiEndpoint:
-    Description: HTTP API Gateway endpoint URL for GraphQL
-    Value: !Sub 'https://${WeatherHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/graphql'
+  AppSyncApiId:
+    Description: AppSync GraphQL API ID
+    Value: !GetAtt WeatherAppSyncApi.ApiId
+
+  AppSyncEndpoint:
+    Description: AppSync managed GraphQL HTTPS endpoint URL
+    Value: !GetAtt WeatherAppSyncApi.GraphQLUrl
+
+  AppSyncApiKey:
+    Description: AppSync public browser API Key
+    Value: !GetAtt WeatherAppSyncApiKey.ApiKey

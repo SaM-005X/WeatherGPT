@@ -1,37 +1,101 @@
 # WeatherGPT — GraphQL Specification & Application Gateway
 
-## 1. Role of GraphQL
+## 1. Role of GraphQL & Dual Execution Contexts
 
 **GraphQL is the application's internal API layer.**
-- **Frontend / Client**: Issues strongly-typed GraphQL queries and mutations to `/api/graphql` (and in Phase 6, to AWS Lambda via API Gateway).
-- **GraphQL Gateway**: Resolvers execute domain operations by delegating directly to `weatherService.ts`, `geocodingService.ts`, and `locationPersistenceService.ts`.
+- **Internal Contract**: Mediates between frontend user interfaces and internal domain services (`weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`).
 - **External Meteorological Source**: The external weather provider is a standard REST API (Open-Meteo REST API). It is **not** required to support GraphQL.
 - **Subscriptions**: Real-time GraphQL subscriptions are treated as optional future functionality and are **not** required for the initial release.
 
-```text
-Next.js Frontend (or GraphQL Client)
-             ↓ (GraphQL POST/GET)
-GraphQL Gateway (/api/graphql via GraphQL Yoga)
-             ↓
-Domain Services (weatherService.ts, geocodingService.ts, locationPersistenceService.ts)
-      ┌──────┴────────────────────────┐
-      ▼                               ▼
-Open-Meteo REST API          Supabase PostgreSQL (anon key)
-```
+### Two Current Execution Contexts (Neither is AppSync)
+The repository currently implements GraphQL across two distinct execution contexts:
+1. **Local Next.js GraphQL Yoga Route**: Served at `/api/graphql` via `src/app/api/graphql/route.ts` using `graphql-yoga`. Provides local schema execution, resolver verification, and GraphiQL playground in development.
+2. **Local AWS Lambda GraphQL Yoga Foundation (Phase 6)**: Implemented in `backend/src/handlers/graphql.ts` behind an API Gateway HTTP API v2 wrapper. Verified offline/locally via integration tests; **not deployed** to AWS.
+
+> **Critical Note on AppSync**: Neither of these existing execution contexts represents the target AWS AppSync architecture. AppSync will be introduced in Phase 8.5 as a fully managed AWS service, replacing the API Gateway + Yoga Lambda layer with direct managed GraphQL routing to domain-grouped Lambda resolvers.
 
 ---
 
-## 2. Implementation Status
+## 2. Architecture Transition Path
 
-- **GraphQL Gateway Implementation**: Built using `graphql-yoga` and standard Web Fetch API in `src/app/api/graphql/route.ts`.
-- **Interactive Playground**: GraphiQL interface enabled in development at `http://localhost:3000/api/graphql`.
-- **Dashboard Status**: The active dashboard (`src/app/page.tsx`) intentionally continues using the proven direct `fetchWeatherData()` domain service for maximum stability.
-- **GraphQL Client Adapter**: `src/graphql/client/weatherAdapter.ts` provides a drop-in `fetchWeatherViaGraphQL()` adapter ready for future migration.
-- **Serverless Lambda Reuse (Phase 6)**: The Lambda GraphQL handler (`backend/src/handlers/graphql.ts`) reuses the same GraphQL schema/resolver implementation and has been verified locally. Actual cloud deployment to AWS remains deferred.
-- **Freshness & Deduplication Integration (Phase 7 & 7.2)**: Weather resolvers automatically benefit from the tiered freshness windows (5m current, 30m hourly, 2h daily, 24h stale fallback), in-flight deduplication, and caller cancellation isolation implemented in `weatherService.ts`.
-- **Unit Representation**: All weather metrics are normalized and returned strictly in **Celsius**. Display conversions (°C / °F) are handled on the client display layer by `temperature.ts` and `LocationContext`.
-- **Weather Assistant Architecture & Stub (Phase 5/8 Preparation)**: The GraphQL schema includes `askWeatherAssistant` mutation and `ChatResponse` type. Resolvers implement message validation and a simulated response stub. Real LLM connection, server-side weather context grounding, and guardrail enforcement remain deferred to Phase 9.
-- **Future Feature Domains**: Future feature domains (Air Quality, Astronomy, Radar, Hazards) will attach as clean resolvers and types under this established schema.
+The application evolves through three explicit architectural states:
+
+### State 1: Completed Client Wiring (Phase 8.5.8 Operational)
+```text
+Next.js Dashboard
+       │
+       ▼
+fetchWeatherByCoordinates (@/lib/api/graphqlClient)
+       │
+       ├─────────────────────────────────┐
+       ▼                                 ▼
+[AWS AppSync Endpoint]           [Fallback / Direct]
+(Production: x-api-key)          weatherService.ts (Open-Meteo REST)
+       │
+       ▼
+weatherFunction Lambda
+       │
+       ▼
+weatherService.ts (In-memory cache, tiered freshness)
+       │
+       ▼
+Open-Meteo REST API
+```
+- The dashboard is now wired directly to `fetchWeatherByCoordinates` in `src/lib/api/graphqlClient.ts`.
+- In production, it executes typed GraphQL queries against the live AWS AppSync HTTPS endpoint using `NEXT_PUBLIC_APPSYNC_API_KEY`.
+- Includes graceful fallback to direct domain service if the cloud endpoint encounters network interruptions, ensuring uninterrupted user experience.
+
+### State 2: Target Local Development (Phase 8.5.8 Wiring)
+```text
+Next.js Dashboard
+       │
+       ▼
+weatherAdapter.ts
+       │
+       ▼
+graphqlClient.ts
+       │
+       ▼
+GraphQL Yoga Gateway (/api/graphql)
+       │
+       ▼
+weatherService.ts (In-memory cache, tiered freshness)
+       │
+       ▼
+Open-Meteo REST API
+```
+- In local development, `graphqlClient.ts` targets `/api/graphql`.
+- Next.js development remains fully functional offline without AWS credentials.
+
+### State 3: Target AWS Production (Phase 8.5.7+ Deployment)
+```text
+Next.js Dashboard
+       │
+       ▼
+weatherAdapter.ts
+       │
+       ▼
+graphqlClient.ts
+       │
+       ▼
+AWS AppSync (Managed Serverless GraphQL)
+       │
+       ├─────────────────────────────────┬─────────────────────────────────┐
+       ▼                                 ▼                                 ▼
+weatherFunction Lambda             locationFunction Lambda            assistantFunction Lambda
+(Thin Adapter: Node.js/ARM64)      (Thin Adapter: Node.js/ARM64)      (Thin Adapter — Phase 9)
+       │                                 │                                 │
+       ▼                                 ▼                                 ▼
+weatherService.ts                 geocodingService.ts                LLM Provider
+(In-memory cache, deduplication)   locationPersistenceService.ts     (Weather Grounded)
+       │                                 │
+       ▼                                 ▼
+Open-Meteo REST API               Open-Meteo Geocoding / Supabase
+```
+- AppSync provides the public HTTPS GraphQL endpoint.
+- Lambda functions act strictly as thin adapters delegating to the existing domain services.
+- `weatherService.ts` retains full ownership of caching, deduplication, and Open-Meteo REST queries.
+- Moving the dashboard to this transport requires explicit wiring in Phase 8.5.8; changing environment variables alone does not migrate runtime execution.
 
 ---
 
@@ -301,4 +365,44 @@ The backend does **NOT** currently connect to an LLM. The following pieces const
 - **Frontend Live GraphQL Invocation**: Updating `WeatherAssistant.tsx` to dispatch the GraphQL mutation instead of local mock simulation.
 - **Secure Key Provisioning**: Configuring `LLM_API_KEY` in AWS SSM Parameter Store / deployment environments.
 - **Deterministic Automated Tests**: Verifying guardrail rejections, weather grounding, and error resilience.
+
+---
+
+## 6. Authentication & Access Control (Phase 8.5 vs Phase 9)
+
+Authentication and authorization requirements differ significantly between public weather operations and AI chatbot execution.
+
+### Phase 8.5 Public Weather Pilot
+- **Browser Client Access**: Uses AppSync `API_KEY` for browser-facing public weather queries (`weatherByCoordinates`, `refreshWeather`).
+- **Automation / Backend Access**: Uses `AWS_IAM` for trusted backend/worker execution (e.g. background forecast sync).
+- **Security Boundaries**:
+  - The AppSync API key is **NOT a secret**. It is sent in client request headers (`x-api-key`) and is visible to browser users in network dev tools.
+  - The API key must **NEVER** be described as user authentication or access control for sensitive resources; it serves solely as AppSync endpoint authorization and baseline traffic attribution.
+
+### Phase 9 Weather Chatbot Authorization (Unfinalized)
+- **Paid Resource Protection**: Unlike weather lookups against keyless Open-Meteo, chatbot requests invoke third-party LLMs that incur real-money API token costs.
+- **Abuse Prevention**: Chatbot requests cannot rely solely on a public browser-visible API key. Additional authorization and anti-abuse mechanisms must be evaluated:
+  - Supabase Auth / OIDC token verification.
+  - AWS Lambda Authorizers validating session tokens.
+  - IP-based or session-based rate limiting.
+  - CAPTCHA or cryptographic proof-of-work challenges.
+- **Selection Deferred**: The specific authorization mechanism remains unfinalized and will be formally evaluated and implemented during Phase 9.
+
+---
+
+## 7. Rollback & Recovery Strategies
+
+### Local Development Rollback
+In local development, switching data transport between GraphQL and direct services is instantaneous:
+- The GraphQL client can be configured to point to `/api/graphql` or bypassed in favor of direct `weatherService.ts` via local code or configuration toggles.
+- Zero cloud teardown or external network operations are required.
+
+### Production AWS Rollback
+- **Build Invariant**: Modifying `.env.local` or environment variables locally does **NOT** roll back an already compiled, bundled, and deployed Next.js production build.
+- **Deployment Strategy**: Reverting production transport from AppSync back to direct services or a previous release requires a deliberate deployment action:
+  - Re-deploying the previous release artifact via the CI/CD pipeline.
+  - Edge routing adjustments (e.g., Cloudflare edge rules routing API traffic).
+- **Git Recovery Checkpoint**:
+  - The verified recovery checkpoint is commit `72990f1` (`chore: checkpoint before AppSync integration`).
+  - This commit guarantees a 100% clean, verified pre-AppSync codebase if any fundamental architectural rollback is needed.
 

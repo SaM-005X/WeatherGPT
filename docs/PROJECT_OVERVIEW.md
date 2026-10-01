@@ -27,24 +27,25 @@ The platform follows a clean **Decoupled Architecture** featuring a Next.js fron
   - Stale fallback retention: Up to 24 hours on network or provider failure (`isStale: true`).
   - In-flight request deduplication and caller cancellation isolation (`AbortController`).
   - Automatic refresh every 10 minutes with tab visibility detection; non-destructive refresh preserving displayed weather.
-- **Weather Assistant Preview (Phase 9 Preparation)**:
-  - Partially implemented: Functional `WeatherAssistant.tsx` UI on Dashboard with message state, location-aware greeting, input validation, and preview response.
-  - GraphQL schema contract (`askWeatherAssistant`), client mutation operation, and resolver stub implemented. (AI backend and guardrails connect in Phase 9).
+- **Weather Assistant Chatbot with Google Gemini (Phase 9)**:
+  - **Implemented & Verified**: Integrated into Dashboard with interactive `WeatherChat.tsx` panel featuring quick prompt chips (`"Do I need an umbrella today?"`, `"What should I wear?"`, `"Best time for a walk?"`), Enter-key submission, auto-scrolling message history, and animated typing indicator.
+  - **Provider & Model**: Google Gemini (`gemini-2.5-flash`) via the official `@google/genai` SDK with zero complex agent frameworks, vector databases, or LangChain.
+  - **Route & Grounding**: Powered by `/api/chat` injecting real-time `weatherContext` JSON (temperature, conditions, humidity, wind, precipitation, and forecasts for active location) directly into the Gemini system prompt.
+  - **Strict Guardrails**: Automatically enforces strict weather domain rules; off-topic questions (coding, math, trivia, recipes, history, creative writing) are politely refused with standardized message: `'I am your weather assistant and can only help with questions about the current weather, forecasts, and outdoor planning.'`.
+  - **Clean Fallback Engine**: If `GEMINI_API_KEY` is not set or in testing, the assistant operates seamlessly in grounded deterministic meteorological fallback mode without crashing.
 - **Supabase Persistence**:
   - `public.locations`: Persists user-selected and recent locations with deterministic 4-decimal coordinate keys.
   - `public.geocoding_cache`: Caches place-name search results for 30 days.
   - Protected with Row Level Security (RLS) policies for `anon` and `authenticated` roles.
-- **Internal GraphQL Gateway**: `/api/graphql` powered by GraphQL Yoga and typed SDL schema, delegating to domain services. Active dashboard currently uses direct `weatherService.ts`.
-- **AWS Serverless Foundation (Local / IaC)**: Dedicated `backend/` service with Lambda handlers (`graphql.ts`, `sync.ts`), API Gateway v2 event transformers, structured CloudWatch logger, and dual IaC templates (`serverless.yml`, `template.yaml`) implemented and verified locally.
-- **Verified Quality Baseline**: **85 / 85 automated tests passing across 12 test suites**; 0 TypeScript errors; 0 ESLint errors/warnings; clean Next.js production build.
+- **Internal GraphQL Gateway & AWS AppSync (Phases 6 & 8.5)**:
+  - Deployed AWS AppSync managed GraphQL service (`WeatherAppSyncApi`) with Direct Lambda resolver (`WeatherFunction`) in `us-east-1`.
+  - Frontend wired via `fetchWeatherByCoordinates` in `src/lib/api/graphqlClient.ts` with direct domain fallback.
+- **Verified Quality Baseline**: Full automated test suites passing across all functional domains; 0 TypeScript errors; 0 ESLint errors/warnings; clean Next.js production build across 17 routes.
 
-### Deferred / Target Future Architecture (Phases 9 – 12)
-- **Phase 9 (Next Feature Milestone)**: Weather Chatbot (connecting LLM provider via `LLM_API_KEY`, live meteorological context grounding, and server-side weather-only guardrails).
-- **Phase 10**: Docker containerization (multi-stage Dockerfile and container verification strictly deferred until Phase 10).
+### Deferred / Target Future Architecture (Phases 10 – 12)
+- **Phase 10 (Next Infrastructure Milestone)**: Docker containerization (multi-stage Dockerfile and container verification strictly deferred until Phase 10).
 - **Phase 11**: Cloudflare Edge & HTTPS (target deployment architecture for DNS, Full (Strict) SSL, and static CDN).
 - **Phase 12**: Testing & Final Verification (release readiness sign-off).
-- **AWS Cloud Deployment**: Actual cloud provisioning in an AWS account remains deferred.
-- **Persistent Weather Snapshot Tables**: `weather_snapshots`, `forecast_hourly`, and `forecast_daily` tables remain deferred in favor of the high-performance in-memory cache.
 - **Placeholder Sub-Routes**: `/earthquakes`, `/volcanoes`, `/activities`, `/alerts`, `/nowcast`, `/storms`, `/air-quality`, and `/astronomy` are presentational UI placeholders; backend services and live data integration remain deferred to future feature expansions.
 
 ---
@@ -58,8 +59,8 @@ The platform follows a clean **Decoupled Architecture** featuring a Next.js fron
 | **Mapping & Radar** | **Leaflet + RainViewer API v2** | **Implemented & Verified** | Interactive map centered on active coordinates with GPS accuracy circle and Doppler radar overlay. |
 | **Weather Domain Service** | **Open-Meteo REST API via `weatherService.ts`** | **Implemented & Verified** | Upstream meteorological source, cloud cover, WMO mapping, normalization, and tiered cache. |
 | **Database & Persistence** | **Supabase PostgreSQL** | **Implemented & Verified** | Persistent `locations` and 30-day `geocoding_cache` tables with Row Level Security. |
-| **API Layer** | **GraphQL (GraphQL Yoga)** | **Implemented & Verified Locally** | Internal application gateway at `/api/graphql` with typed SDL schema, domain resolvers, and chat stub. |
-| **AI Weather Assistant** | **UI & GraphQL Stub (LLM in Phase 9)** | **Partially Implemented (Phase 9 Target)**| Front-end advisor UI and GraphQL mutation stub; AI backend and guardrails connect in Phase 9. |
+| **API Layer** | **GraphQL (AppSync & GraphQL Yoga)** | **Implemented & Deployed** | Managed AWS AppSync production GraphQL endpoint & local `/api/graphql` route with typed SDL schema. |
+| **AI Weather Assistant** | **Google Gemini (`gemini-2.5-flash`), Next.js Route (`/api/chat`) & UI Panel** | **Implemented & Verified (Phase 9)** | Weather-grounded chatbot with strict guardrails, prompt chips, and deterministic fallback. |
 | **Backend Runtime** | **Node.js (TypeScript) on AWS Lambda** | **Implemented & Verified Locally** | Serverless Lambda handlers in `backend/` for GraphQL and EventBridge background sync. |
 | **AWS Cloud Infrastructure** | **API Gateway v2, EventBridge, CloudWatch, SSM** | **IaC Verified Locally; Cloud Deployment Deferred** | Infrastructure as Code (`serverless.yml`, `template.yaml`) prepared for future deployment. |
 | **Containerization** | **Docker** | **Strictly Deferred to Phase 10** | Production containerization created after Phase 9 completion. |
