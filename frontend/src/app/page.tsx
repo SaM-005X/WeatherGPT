@@ -74,7 +74,12 @@ export default function WeatherDashboardPage() {
           setLastRefreshedAt(now);
         }
       } catch (err: unknown) {
-        if (isCancelled) {
+        if (
+          isCancelled ||
+          (err instanceof DOMException && err.name === 'AbortError') ||
+          (err instanceof Error && /aborted/i.test(err.message))
+        ) {
+          // Ignore component unmount / superseded in-flight cancellations
           return;
         }
         const message = err instanceof Error ? err.message : 'Unable to retrieve weather data.';
@@ -115,6 +120,13 @@ export default function WeatherDashboardPage() {
         setRefreshNotice(null);
       }
     } catch (err: unknown) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && /aborted/i.test(err.message))
+      ) {
+        // Ignore aborted refreshes cleanly
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Unable to retrieve weather data.';
       if (weatherDataRef.current) {
         setWeatherData((prev) =>
@@ -138,6 +150,7 @@ export default function WeatherDashboardPage() {
       setIsRefreshing(false);
     }
   }, [activeLocation.latitude, activeLocation.longitude]);
+
 
   // 6. Automatic Weather Refresh Lifecycle (every 10 minutes, active-location safe, tab-visibility aware, manual-refresh synchronized)
   useEffect(() => {

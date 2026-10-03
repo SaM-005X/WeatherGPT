@@ -20,8 +20,9 @@ import {
   SatelliteProvider,
 } from '@/lib/satelliteService';
 import type { WeatherReport } from '@/types/weather';
-import { fetchWeatherData } from '@/lib/weatherService';
+import { fetchWeatherData, weatherCache, getCacheKey, getWeatherCacheKey } from '@/lib/weatherService';
 import { fetchStormData, StormReport } from '@/lib/stormService';
+
 
 export interface LayerState {
   radar: boolean;
@@ -59,17 +60,27 @@ export default function WeatherMapInternal({
   isLoading = false,
   onLayerStateChange,
 }: WeatherMapInternalProps) {
-  // Synchronize cloud and weather metrics from direct props or weatherData
-  const effectiveCloudCover = cloudCover ?? weatherData?.current?.cloudCover;
-  const effectiveConditionDescription = conditionDescription ?? weatherData?.current?.conditionDescription;
+  // Check client weatherCache synchronously first to eliminate secondary un-memoized network fetches
+  const cachedEntry = weatherCache.get(getCacheKey(latitude, longitude)) || weatherCache.get(getWeatherCacheKey(latitude, longitude));
+  const cachedCloudCover = cachedEntry?.data?.current?.cloudCover;
+  const cachedConditionDesc = cachedEntry?.data?.current?.conditionDescription;
 
-  // Fallback internal fetch if cloud metrics are omitted and not loading
-  const [internalCloudCover, setInternalCloudCover] = useState<number | undefined>(undefined);
-  const [internalConditionDesc, setInternalConditionDesc] = useState<string | undefined>(undefined);
+  // Synchronize cloud and weather metrics from direct props, weatherData, or client weatherCache
+  const effectiveCloudCover = cloudCover ?? weatherData?.current?.cloudCover ?? cachedCloudCover;
+  const effectiveConditionDescription = conditionDescription ?? weatherData?.current?.conditionDescription ?? cachedConditionDesc;
+
+  // Fallback internal fetch only if cloud metrics are completely absent across props, weatherData, and cache
+  const [internalCloudCover, setInternalCloudCover] = useState<number | undefined>(cachedCloudCover);
+  const [internalConditionDesc, setInternalConditionDesc] = useState<string | undefined>(cachedConditionDesc);
 
   useEffect(() => {
-    // If external cloud metrics are already available or data is currently loading, skip internal fetch
-    if (cloudCover !== undefined || weatherData?.current?.cloudCover !== undefined || isLoading) {
+    // If external/cached cloud metrics are already available or data is currently loading, skip internal fetch
+    if (
+      cloudCover !== undefined ||
+      weatherData?.current?.cloudCover !== undefined ||
+      cachedCloudCover !== undefined ||
+      isLoading
+    ) {
       return;
     }
 
@@ -90,10 +101,11 @@ export default function WeatherMapInternal({
     return () => {
       isCancelled = true;
     };
-  }, [latitude, longitude, cloudCover, weatherData, isLoading]);
+  }, [latitude, longitude, cloudCover, weatherData, cachedCloudCover, isLoading]);
 
   const displayCloudCover = effectiveCloudCover ?? internalCloudCover;
   const displayConditionDescription = effectiveConditionDescription ?? internalConditionDesc;
+
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);

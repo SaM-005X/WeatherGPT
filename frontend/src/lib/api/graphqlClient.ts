@@ -280,102 +280,196 @@ function normalizeWeatherReport(report: GraphQLWeatherReport): WeatherReport {
   };
 }
 
+export const inFlightRequests = new Map<string, Promise<WeatherReport>>();
+
+/**
+ * Returns count of currently active in-flight GraphQL network requests.
+ */
+export function getGraphQLInFlightCount(): number {
+  return inFlightRequests.size;
+}
+
+/**
+ * Clears active in-flight GraphQL requests (useful for tests).
+ */
+export function clearGraphQLInFlightRequests(): void {
+  inFlightRequests.clear();
+}
+
+/**
+ * Helper to attach an AbortSignal to a promise without cancelling the underlying work
+ * for other concurrent callers sharing the promise.
+ */
+function attachAbortSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('The user aborted a request.', 'AbortError'));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('The user aborted a request.', 'AbortError'));
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    promise
+      .then((val) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(val);
+      })
+      .catch((err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+  });
+}
+
 /**
  * Fetches weather data for given coordinates by executing a GraphQL query/mutation
  * against the live AppSync backend via standard native fetch.
  *
- * Includes graceful fallback to direct domain service if the cloud endpoint
- * encounters transient network failures and fallbackToDirect is not disabled.
+ * Includes fast-fail on overload / timeout (2500ms) and graceful fallback
+ * to direct domain service if the cloud endpoint encounters errors.
+ * Coordinate request deduplication ensures multiple callers share a single in-flight promise.
  */
 export async function fetchWeatherByCoordinates(
   latitude: number,
   longitude: number,
   options?: FetchWeatherOptions
 ): Promise<WeatherReport> {
-  const endpoint = getAppSyncEndpoint();
-  const apiKey = getAppSyncApiKey();
+  const dedupKey = `${latitude.toFixed(3)}_${longitude.toFixed(3)}`;
 
-  const query = WEATHER_BY_COORDINATES_QUERY;
-  const operationName = 'WeatherByCoordinates';
-  const variables = {
-    coordinates: {
-      latitude,
-      longitude,
-    },
-  };
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-
-  if (apiKey) {
-    headers['x-api-key'] = apiKey;
+  // Re-use active in-flight request if already pending for these coordinates
+  if (inFlightRequests.has(dedupKey) && !options?.forceRefresh) {
+    const activePromise = inFlightRequests.get(dedupKey)!;
+    return await attachAbortSignal(activePromise, options?.signal);
   }
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        query,
-        variables,
-        operationName,
-      }),
-      signal: options?.signal,
-    });
+  const executeRequest = (async (): Promise<WeatherReport> => {
+    const endpoint = getAppSyncEndpoint();
+    const apiKey = getAppSyncApiKey();
 
-    if (!response.ok) {
-      throw new GraphQLClientError(
-        `AppSync HTTP Error: ${response.status} ${response.statusText}`,
-        undefined,
-        response.status
-      );
+    const query = WEATHER_BY_COORDINATES_QUERY;
+    const operationName = 'WeatherByCoordinates';
+    const variables = {
+      coordinates: {
+        latitude,
+        longitude,
+      },
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+
+    if (apiKey) {
+      headers['x-api-key'] = apiKey;
     }
 
-    const json = (await response.json()) as GraphQLResponseBody<WeatherByCoordinatesResponse>;
+    // 4500ms timeout controller for AppSync fast-fail
+    const timeoutController = new AbortController();
+    const timeoutTimer = setTimeout(() => {
+      timeoutController.abort(new Error('AppSync timeout after 4500ms'));
+    }, 4500);
 
-    if (json.errors && json.errors.length > 0) {
-      const errorMsg = json.errors.map((e) => e.message).join('; ');
-      throw new GraphQLClientError(`AppSync GraphQL Error: ${errorMsg}`, json.errors);
-    }
-
-    if (!json.data || !json.data.weatherByCoordinates) {
-      throw new GraphQLClientError('AppSync GraphQL response returned empty weather data.');
-    }
-
-    return normalizeWeatherReport(json.data.weatherByCoordinates);
-  } catch (err: unknown) {
-    // Re-throw user/caller cancellation abort errors immediately
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw err;
-    }
-
-    // Graceful fallback to direct weatherService if enabled (default true)
-    if (options?.fallbackToDirect !== false) {
-      try {
-        console.warn(
-          `[GraphQLClient] AppSync query failed (${
-            err instanceof Error ? err.message : String(err)
-          }), falling back to direct service.`
-        );
-        return await fetchWeatherData(latitude, longitude, {
-          signal: options?.signal,
-          forceRefresh: options?.forceRefresh,
-        });
-      } catch (fallbackErr: unknown) {
-        // If fallback also aborts, rethrow abort
-        if (fallbackErr instanceof DOMException && fallbackErr.name === 'AbortError') {
-          throw fallbackErr;
+    // Merge options.signal with internal timeoutController
+    let removeCallerAbortListener: (() => void) | undefined;
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        clearTimeout(timeoutTimer);
+        if (options.fallbackToDirect === false) {
+          throw new DOMException('The user aborted a request.', 'AbortError');
         }
-        console.warn('[GraphQLClient] Direct fallback also failed:', fallbackErr);
+        // If fallback is enabled, switch silently to direct service fallback
+        console.warn('[GraphQLClient] Caller signal already aborted, executing direct fallback.');
+        return await fetchWeatherData(latitude, longitude, {
+          forceRefresh: options.forceRefresh,
+        });
       }
+      const onCallerAbort = () => {
+        timeoutController.abort(new DOMException('The user aborted a request.', 'AbortError'));
+      };
+      options.signal.addEventListener('abort', onCallerAbort, { once: true });
+      removeCallerAbortListener = () => {
+        options.signal?.removeEventListener('abort', onCallerAbort);
+      };
     }
 
-    if (err instanceof GraphQLClientError) {
-      throw err;
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query,
+          variables,
+          operationName,
+        }),
+        signal: timeoutController.signal,
+      });
+
+      clearTimeout(timeoutTimer);
+      if (removeCallerAbortListener) removeCallerAbortListener();
+
+      if (!response.ok) {
+        throw new GraphQLClientError(
+          `AppSync HTTP Error: ${response.status} ${response.statusText}`,
+          undefined,
+          response.status
+        );
+      }
+
+      const json = (await response.json()) as GraphQLResponseBody<WeatherByCoordinatesResponse>;
+
+      if (json.errors && json.errors.length > 0) {
+        const errorMsg = json.errors.map((e) => e.message).join('; ');
+        throw new GraphQLClientError(`AppSync GraphQL Error: ${errorMsg}`, json.errors);
+      }
+
+      if (!json.data || !json.data.weatherByCoordinates) {
+        throw new GraphQLClientError('AppSync GraphQL response returned empty weather data.');
+      }
+
+      return normalizeWeatherReport(json.data.weatherByCoordinates);
+    } catch (err: unknown) {
+      clearTimeout(timeoutTimer);
+      if (removeCallerAbortListener) removeCallerAbortListener();
+
+      // Graceful fallback to direct weatherService if enabled (default true)
+      if (options?.fallbackToDirect !== false) {
+        try {
+          console.warn(
+            `[GraphQLClient] AppSync request failed or timed out (${
+              err instanceof Error ? err.message : String(err)
+            }), executing direct fallback.`
+          );
+          return await fetchWeatherData(latitude, longitude, {
+            forceRefresh: options?.forceRefresh,
+          });
+        } catch (fallbackErr: unknown) {
+          console.warn('[GraphQLClient] Direct fallback also failed:', fallbackErr);
+        }
+      }
+
+      // If user/caller explicitly cancelled the request and fallback was disabled
+      if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+
+      if (err instanceof GraphQLClientError) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : 'Unknown network failure';
+      throw new GraphQLClientError(`AppSync request failed: ${message}`);
+    } finally {
+      inFlightRequests.delete(dedupKey);
     }
-    const message = err instanceof Error ? err.message : 'Unknown network failure';
-    throw new GraphQLClientError(`AppSync request failed: ${message}`);
-  }
+
+  })();
+
+  inFlightRequests.set(dedupKey, executeRequest);
+  return await attachAbortSignal(executeRequest, options?.signal);
 }
+

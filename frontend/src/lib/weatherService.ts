@@ -78,6 +78,13 @@ export const FRESHNESS_POLICY = {
   HOURLY_TTL_MS: 30 * 60 * 1000,          // 30 minutes for hourly forecast
   DAILY_TTL_MS: 2 * 60 * 60 * 1000,       // 2 hours for 7-day daily forecast
   STALE_FALLBACK_MAX_AGE_MS: 24 * 60 * 60 * 1000, // 24 hours maximum for stale-while-revalidate fallback
+  SWR_FRESH_TTL_MS: 3 * 60 * 1000,        // 3 minutes fresh for instant client-side render
+  SWR_STALE_TTL_MS: 15 * 60 * 1000,       // 15 minutes stale-while-revalidate window
+} as const;
+
+export const SWR_POLICY = {
+  FRESH_TTL_MS: 3 * 60 * 1000,            // 3 minutes completely fresh
+  SWR_TTL_MS: 15 * 60 * 1000,             // 15 minutes stale-while-revalidate window
 } as const;
 
 export interface WeatherCacheEntry {
@@ -90,7 +97,9 @@ export interface WeatherCacheEntry {
 }
 
 const memoryCache = new Map<string, WeatherCacheEntry>();
+export const weatherCache = memoryCache;
 const inFlightRequests = new Map<string, Promise<WeatherReport>>();
+
 
 /**
  * Builds standard cache metadata for a given cache entry.
@@ -161,10 +170,22 @@ export function getInFlightRequestCount(): number {
 
 /**
  * Generates a deterministic cache key based on coordinates.
+ * Defaults to 4 decimal places for legacy compatibility, or formats with units when provided.
  */
-export function getCacheKey(latitude: number, longitude: number): string {
+export function getCacheKey(latitude: number, longitude: number, units?: string): string {
+  if (units !== undefined) {
+    return `${latitude.toFixed(3)}_${longitude.toFixed(3)}_${units}`;
+  }
   return `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
 }
+
+/**
+ * Generates standard SWR cache key: lat_lon_units rounded to 3 decimal places.
+ */
+export function getWeatherCacheKey(latitude: number, longitude: number, units = 'metric'): string {
+  return `${latitude.toFixed(3)}_${longitude.toFixed(3)}_${units}`;
+}
+
 
 /**
  * Clears the in-memory weather cache (useful for testing and debug).
@@ -478,15 +499,28 @@ async function executeNetworkFetch(
 }
 
 /**
+ * Helper to populate cache entries under both 4-decimal and 3-decimal keys.
+ */
+function setCacheEntry(latitude: number, longitude: number, entry: WeatherCacheEntry): void {
+  const legacyKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+  const swrKey = `${latitude.toFixed(3)}_${longitude.toFixed(3)}_metric`;
+  memoryCache.set(legacyKey, entry);
+  memoryCache.set(swrKey, entry);
+}
+
+/**
  * Fetches weather data for specified coordinates.
  *
- * Tiered Freshness Architecture:
+ * Tiered Freshness & Stale-While-Revalidate (SWR) Architecture:
  * 1. Validate coordinates.
- * 2. Check 5-minute memory cache (unless forceRefresh is true).
- * 3. Deduplicate in-flight requests (prevent duplicate concurrent calls for same coordinates).
- * 4. Fetch from Open-Meteo REST API and normalize into WeatherReport.
- * 5. On failure, fall back to previous valid cached data (stale-while-revalidate) if available.
- * 6. Populate cache with fine-grained timestamps and metadata.
+ * 2. Instant Cache Hit (<10ms):
+ *    - If fresh (< 3 mins), return instantly without network overhead.
+ *    - If stale-while-revalidate window (< 15 mins), return cached snapshot INSTANTLY
+ *      and trigger background revalidation so the UI is unblocked.
+ * 3. In-flight Request Deduplication: Re-use active network request if already in flight.
+ * 4. Network Fetch to Open-Meteo REST API:
+ *    - Catch overload (HTTP 429/503 / "service overloaded") and return cached data safely.
+ * 5. Stale Fallback: If network fails and cached data exists (< 24h), return stale snapshot.
  */
 export async function fetchWeatherData(
   latitude: number,
@@ -495,14 +529,59 @@ export async function fetchWeatherData(
 ): Promise<WeatherReport> {
   validateCoordinates(latitude, longitude);
 
-  const cacheKey = getCacheKey(latitude, longitude);
+  const legacyKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+  const swrKey = `${latitude.toFixed(3)}_${longitude.toFixed(3)}_metric`;
   const now = Date.now();
-  const cached = memoryCache.get(cacheKey);
+  const cached = memoryCache.get(legacyKey) || memoryCache.get(swrKey);
 
-  // 1. Fresh Cache Hit (unless forceRefresh is true)
+  // 1. Instant Cache Check (<10ms)
   if (!options?.forceRefresh && cached) {
-    const isCurrentFresh = (now - cached.timestamp) < FRESHNESS_POLICY.CURRENT_TTL_MS;
+    const ageMs = now - cached.timestamp;
+    const isCurrentFresh = ageMs < SWR_POLICY.FRESH_TTL_MS;
+    const isWithinSwrWindow = ageMs < SWR_POLICY.SWR_TTL_MS;
+
     if (isCurrentFresh) {
+      return {
+        ...cached.data,
+        current: {
+          ...cached.data.current,
+          isCached: true,
+          isStale: false,
+        },
+        cacheMetadata: buildCacheMetadata(cached, now),
+      };
+    }
+
+    if (isWithinSwrWindow) {
+      // Background revalidation: unblock UI immediately, update cache in background
+      if (!inFlightRequests.has(legacyKey) && !inFlightRequests.has(swrKey)) {
+        const revalidatePromise = (async (): Promise<WeatherReport> => {
+          try {
+            const freshData = await executeNetworkFetch(latitude, longitude);
+            const fetchTime = Date.now();
+            const newEntry: WeatherCacheEntry = {
+              key: legacyKey,
+              timestamp: fetchTime,
+              currentFetchedAt: fetchTime,
+              hourlyFetchedAt: fetchTime,
+              dailyFetchedAt: fetchTime,
+              data: freshData,
+            };
+            setCacheEntry(latitude, longitude, newEntry);
+            return freshData;
+          } catch (revalidateErr) {
+            console.warn('[WeatherService] Background SWR revalidation failed:', revalidateErr);
+            return cached.data;
+          } finally {
+            inFlightRequests.delete(legacyKey);
+            inFlightRequests.delete(swrKey);
+          }
+        })();
+        inFlightRequests.set(legacyKey, revalidatePromise);
+        inFlightRequests.set(swrKey, revalidatePromise);
+      }
+
+
       return {
         ...cached.data,
         current: {
@@ -516,8 +595,12 @@ export async function fetchWeatherData(
   }
 
   // 2. In-Flight Request Deduplication: Re-use active network request if already in flight
-  if (inFlightRequests.has(cacheKey)) {
-    const inFlight = inFlightRequests.get(cacheKey)!;
+  if (inFlightRequests.has(legacyKey)) {
+    const inFlight = inFlightRequests.get(legacyKey)!;
+    return await attachAbortSignal(inFlight, options?.signal);
+  }
+  if (inFlightRequests.has(swrKey)) {
+    const inFlight = inFlightRequests.get(swrKey)!;
     return await attachAbortSignal(inFlight, options?.signal);
   }
 
@@ -528,7 +611,7 @@ export async function fetchWeatherData(
 
       const fetchTime = Date.now();
       const newEntry: WeatherCacheEntry = {
-        key: cacheKey,
+        key: legacyKey,
         timestamp: fetchTime,
         currentFetchedAt: fetchTime,
         hourlyFetchedAt: fetchTime,
@@ -536,7 +619,7 @@ export async function fetchWeatherData(
         data: freshData,
       };
 
-      memoryCache.set(cacheKey, newEntry);
+      setCacheEntry(latitude, longitude, newEntry);
 
       return {
         ...freshData,
@@ -548,9 +631,12 @@ export async function fetchWeatherData(
         cacheMetadata: buildCacheMetadata(newEntry, fetchTime),
       };
     } catch (err: unknown) {
-      // 4. Stale-while-revalidate fallback: If network fails and cached data is available within 24h
+      // 4. Stale fallback / Overload resilience:
+      // If service is overloaded (429/503) or network fails, return cached snapshot rather than failing or hanging
       const allowFallback = options?.allowStaleFallback !== false;
-      if (allowFallback && cached && (Date.now() - cached.timestamp < FRESHNESS_POLICY.STALE_FALLBACK_MAX_AGE_MS)) {
+      const isOverloaded = err instanceof Error && /overload|429|503/i.test(err.message);
+
+      if ((allowFallback || isOverloaded) && cached && (Date.now() - cached.timestamp < FRESHNESS_POLICY.STALE_FALLBACK_MAX_AGE_MS)) {
         return {
           ...cached.data,
           current: {
@@ -568,13 +654,16 @@ export async function fetchWeatherData(
 
       throw err;
     } finally {
-      inFlightRequests.delete(cacheKey);
+      inFlightRequests.delete(legacyKey);
+      inFlightRequests.delete(swrKey);
     }
   })();
 
-  inFlightRequests.set(cacheKey, fetchPromise);
+  inFlightRequests.set(legacyKey, fetchPromise);
+  inFlightRequests.set(swrKey, fetchPromise);
   return await attachAbortSignal(fetchPromise, options?.signal);
 }
+
 
 // ---------------------------------------------------------------------------
 // Open-Meteo 15-Minute Precipitation Nowcast Service
