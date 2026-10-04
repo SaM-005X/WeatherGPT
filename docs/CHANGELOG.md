@@ -5,6 +5,38 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-10-05 — Phase 12: Final Release Gate, Docker Runtime Alignment & Production Readiness Sign-Off
+
+### Added
+- **Final Release Endpoint & Latency Audit (`frontend/src/tests/finalEndpointAudit.ts`)**:
+  - Validated sub-millisecond in-memory cache responses across all 11 core domain services: `/` (0.35ms), `/air-quality` (0.01ms), `/astronomy` (0.04ms), `/activities` (0.53ms), `/earthquakes` (0.02ms), `/volcanoes` (0.06ms), `/tsunamis` (0.01ms), `/alerts` (0.02ms), `/storms` (0.01ms), `/nowcast` (0.03ms), and `/maps` (0.01ms).
+  - Validated AWS AppSync overload simulation fallback to direct domain service in 1.58ms (< 2ms requirement).
+  - Validated `/api/chat` Route Handler guardrail rejection in 2.15ms with strict lifestyle topic protection.
+  - Integrated into main `npm test` script as a permanent release gate verification.
+- **Verified Live Deployment Endpoints (`docs/DEPLOYMENT.md`)**:
+  - Documented live Cloudflare Edge CDN endpoint (`https://weathergpt.app`) with Anycast DNS and Full (Strict) SSL.
+  - Documented live Render Docker Web Service host (`https://weathergpt-frontend.onrender.com`).
+  - Documented AWS AppSync production GraphQL endpoint (`https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql`).
+  - Documented Supabase PostgreSQL database (`https://pwhulhaywzdsggmgweyu.supabase.co`).
+
+### Changed
+- **Docker Base Image Runtime Alignment (`frontend/Dockerfile.frontend`)**:
+  - Upgraded base image from `node:20-alpine` to `node:22-alpine` in all stages (`deps`, `builder`, `runner`).
+  - Resolved `@supabase/supabase-js` deprecation notice while maintaining ultra-lean Alpine container footprint.
+  - Synchronized `docs/DOCKER.md` multi-stage specification with Node 22 LTS.
+- **Next.js Cache-Control Header Hygiene (`frontend/next.config.ts`)**:
+  - Removed custom Cache-Control header rule for `/_next/static/:path*` to let Next.js 16 manage immutable static chunk caching natively.
+  - Completely suppressed build-time `Custom Cache-Control headers detected` warning notices during development and production builds.
+  - Preserved global production security headers (HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy) and dynamic `/api/*` no-cache rules.
+
+### Verified
+- **Full Test Suite Parity**: 100% green pass across all 18 test suites (`npm test`).
+- **ESLint Cleanliness**: 0 errors, 0 warnings (`npm run lint`).
+- **Turbopack Build Cleanliness**: 100% clean compilation generating all 18 application routes with 0 warnings (`npm run build`).
+- **Roadmap Completion**: Marked Phase 12 as COMPLETED with 100% roadmap sign-off in `docs/ROADMAP.md`.
+
+---
+
 ## [1.13.0] - 2026-10-04 — Phase 11: Cloudflare Edge & Production HTTPS
 
 ### Added

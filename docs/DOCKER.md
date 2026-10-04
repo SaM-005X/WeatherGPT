@@ -15,20 +15,20 @@ WeatherGPT utilizes a secure, multi-stage production Docker container designed a
 
 ```
 [ Stage 1: deps ]
-├── Base: node:20-alpine + libc6-compat
+├── Base: node:22-alpine + libc6-compat
 ├── Ingests: package.json, package-lock.json
 └── Operation: npm ci (Frozen lockfile, devDependencies included for build tools)
        │
        ▼
 [ Stage 2: builder ]
-├── Base: node:20-alpine
+├── Base: node:22-alpine
 ├── Ingests: Cached node_modules + application source code
 ├── Build Arguments: NEXT_PUBLIC_* variables injected into static bundles
 └── Operation: npm run build (Turbopack standalone compilation)
        │
        ▼ Output Tracing: .next/standalone + .next/static + public
 [ Stage 3: runner ]
-├── Base: node:20-alpine (Minimal runtime image, zero npm/build tools)
+├── Base: node:22-alpine (Minimal runtime image, zero npm/build tools)
 ├── Security: Non-root unprivileged system user (nodejs:nextjs UID/GID 1001)
 ├── Artifacts: Standalone node server + static assets + public directory
 └── Entrypoint: ["node", "server.js"] on PORT 3000 (0.0.0.0)
@@ -40,7 +40,7 @@ WeatherGPT utilizes a secure, multi-stage production Docker container designed a
 
 ```dockerfile
 # Stage 1: Dependency resolution
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -48,7 +48,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 
 # Stage 2: Application builder
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -72,7 +72,7 @@ ENV NEXT_PUBLIC_MAP_DEFAULT_LON=$NEXT_PUBLIC_MAP_DEFAULT_LON
 RUN npm run build
 
 # Stage 3: Minimal production runner
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV production

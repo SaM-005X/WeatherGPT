@@ -44,31 +44,17 @@ const nextConfig: NextConfig = {
       },
     ];
 
-    // Aggressive immutable cache-control is only applied in production builds
-    // to avoid Next.js dev server warning: "Setting a custom Cache-Control header can break Next.js development behavior."
+    // Static media assets caching in production (Next.js natively manages /_next/static/ chunk caching)
     if (isProduction) {
-      headersList.push(
-        // Long-term immutable caching for Next.js static asset bundles (enables Cloudflare Edge cache HIT)
-        {
-          source: "/_next/static/:path*",
-          headers: [
-            {
-              key: "Cache-Control",
-              value: "public, max-age=31536000, immutable",
-            },
-          ],
-        },
-        // Static media assets caching
-        {
-          source: "/(favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp|woff|woff2))",
-          headers: [
-            {
-              key: "Cache-Control",
-              value: "public, max-age=31536000, immutable",
-            },
-          ],
-        }
-      );
+      headersList.push({
+        source: "/(favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp|woff|woff2))",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      });
     }
 
     return headersList;

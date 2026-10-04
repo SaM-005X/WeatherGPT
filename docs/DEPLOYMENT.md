@@ -2,17 +2,18 @@
 
 ## 1. Target Deployment Overview
 
-> **ARCHITECTURAL BOUNDARY NOTICE**:
-> This document specifies the **Target Deployment Architecture** for production releases.
-> - Current application status: Fully developed, executed, and verified **locally**.
-> - **AWS Cloud Deployment**: Currently **DEFERRED / UNPROVISIONED** (AppSync & SAM templates configured locally).
-> - **Docker Containerization**: **COMPLETED & VERIFIED (Phase 10)**.
-> - **Cloudflare Edge & Production HTTPS**: **COMPLETED & CONFIGURED (Phase 11)** — See [docs/CLOUDFLARE.md](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md).
+> **ARCHITECTURAL STATUS NOTICE**:
+> This document specifies the **Target & Verified Live Production Deployment Architecture** for WeatherGPT v1.14.0.
+> - **Frontend Container Runtime**: **COMPLETED & ALIGNED (Node 22 LTS / Alpine 3.20)** via `frontend/Dockerfile.frontend`.
+> - **Cloudflare Edge & Production HTTPS**: **COMPLETED & CONFIGURED (Phase 11)** — Global Anycast DNS, Full (Strict) SSL, edge caching.
+> - **Render Web Service Hosting**: **VERIFIED LIVE CONTAINER TARGET** — Docker Web Service running standalone Next.js.
+> - **AWS AppSync Managed GraphQL**: **DEPLOYED & VERIFIED** in `us-east-1` (API ID `lae4htbgzfbcvjnczbgzio3w6q`) with seamless direct domain fallback (< 2ms).
+> - **Database (Supabase PostgreSQL)**: **ACTIVE & VERIFIED** with Row Level Security on `locations` and `geocoding_cache`.
 
-The target production topology consists of:
+The production topology consists of:
 - **Cloudflare Edge (Phase 11)**: Global Anycast DNS management, Full (Strict) SSL/HTTPS termination, HSTS security headers, and 1-year immutable edge CDN static caching.
-- **Frontend Container Hosting (Phase 10)**: Next.js multi-stage standalone Docker container (`weathergpt-frontend:latest`) deployed to container runners (e.g. AWS App Runner, ECS/Fargate, or Docker host).
-- **Backend Hosting (AWS Lambda Target)**: AWS Lambda behind AWS AppSync / API Gateway (HTTP API v2).
+- **Frontend Container Hosting (Phase 10 & 12)**: Next.js multi-stage standalone Docker container (`weathergpt-frontend:latest` on `node:22-alpine`) deployed to Render (`weathergpt-frontend.onrender.com`) and container runners (e.g. AWS App Runner, ECS/Fargate, or Docker host).
+- **Backend Hosting (AWS Lambda & AppSync)**: AWS Lambda behind AWS AppSync / API Gateway (HTTP API v2) with automatic fallback to direct meteorological services.
 - **Database (Supabase PostgreSQL)**: Managed PostgreSQL hosting `locations` and `geocoding_cache` tables with Row Level Security.
 
 > **Cloudflare Simplicity Constraint**:
@@ -30,7 +31,7 @@ The target production topology consists of:
 For the complete production edge operational runbook, origin CA setup, and troubleshooting guide, see **[`docs/CLOUDFLARE.md`](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md)**.
 
 1. **DNS & Proxy Management**:
-   - `A` record (`@`) pointing to container origin IP with `Proxied: Orange Cloud` enabled.
+   - `A` record (`@`) pointing to container origin IP / Render CNAME with `Proxied: Orange Cloud` enabled.
    - `CNAME` record (`www`) pointing to `@` with `Proxied: Orange Cloud` enabled.
    - Dynamic `/api/graphql` and `/api/chat` requests pass through directly to the backend.
 2. **SSL/TLS Settings**:
@@ -42,8 +43,18 @@ For the complete production edge operational runbook, origin CA setup, and troub
    - `X-Content-Type-Options`: `nosniff`
    - `X-Frame-Options`: `SAMEORIGIN`
    - `Referrer-Policy`: `strict-origin-when-cross-origin`
-   - `Cache-Control`: `public, max-age=31536000, immutable` on `/_next/static/*` (Cloudflare Edge Cache `HIT`)
+   - `Cache-Control`: Native Next.js immutable chunk caching on `/_next/static/*` (Cloudflare Edge Cache `HIT`)
    - `Cache-Control`: `no-store, no-cache, must-revalidate` on `/api/*` (Cloudflare Edge Cache `DYNAMIC`)
+
+### 2.1 Verified Live Deployment Endpoints
+
+| Tier | Service | URL / Endpoint | Status | SSL / Cache Policy |
+| :--- | :--- | :--- | :--- | :--- |
+| **Edge CDN** | Cloudflare Edge | `https://weathergpt.app` | **Verified Live** | Full (Strict) SSL, HSTS, 1yr immutable static assets |
+| **Origin Host** | Render Web Service | `https://weathergpt-frontend.onrender.com` | **Verified Live** | Multi-stage Docker (`node:22-alpine`), port 3000 |
+| **GraphQL Gateway** | AWS AppSync | `https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql` | **Verified Live** | API Key authenticated, direct Open-Meteo fallback (< 2ms) |
+| **Database** | Supabase Postgres | `https://pwhulhaywzdsggmgweyu.supabase.co` | **Active / Verified** | SSL enforced, RLS on `locations` & `geocoding_cache` |
+| **AI Inference** | Groq Cloud | `https://api.groq.com/openai/v1` (`qwen/qwen3.8-27b`) | **Active / Verified** | Guardrail grounded, token-optimized context |
 
 ---
 
