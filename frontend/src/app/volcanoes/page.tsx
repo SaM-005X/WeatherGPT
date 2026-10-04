@@ -95,31 +95,31 @@ export default function VolcanoesPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Active Eruptions</span>
-          <p className="text-lg font-bold text-red-600 mt-0.5">
+          <div className="text-lg font-bold text-red-600 mt-0.5">
             {isLoading ? <LoadingSkeleton className="h-6 w-10" /> : data?.eruptingCount ?? 0}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400">Aviation RED / Active</span>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Minor Unrest</span>
-          <p className="text-lg font-bold text-amber-600 mt-0.5">
+          <div className="text-lg font-bold text-amber-600 mt-0.5">
             {isLoading ? <LoadingSkeleton className="h-6 w-10" /> : data?.unrestCount ?? 0}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400">ORANGE / YELLOW Alert</span>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Monitored</span>
-          <p className="text-lg font-bold text-slate-900 mt-0.5">
+          <div className="text-lg font-bold text-slate-900 mt-0.5">
             {isLoading ? <LoadingSkeleton className="h-6 w-10" /> : data?.totalCount ?? 0}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400">GVP / USGS Database</span>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Nearest Volcano</span>
-          <p className="text-sm font-bold text-slate-900 mt-0.5 truncate">
+          <div className="text-sm font-bold text-slate-900 mt-0.5 truncate">
             {isLoading ? (
               <LoadingSkeleton className="h-6 w-20" />
             ) : data?.nearestVolcano ? (
@@ -127,7 +127,7 @@ export default function VolcanoesPage() {
             ) : (
               'N/A'
             )}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-500">
             {data?.nearestVolcano ? `${data.nearestVolcano.distanceKm} km (${data.nearestVolcano.bearing})` : 'N/A'}
           </span>

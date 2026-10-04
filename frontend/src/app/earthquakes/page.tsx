@@ -95,15 +95,15 @@ export default function EarthquakesPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Tracked</span>
-          <p className="text-lg font-bold text-slate-900 mt-0.5">
+          <div className="text-lg font-bold text-slate-900 mt-0.5">
             {isLoading ? <LoadingSkeleton className="h-6 w-12" /> : data?.totalCount ?? 0}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400">Past 24 hours</span>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Nearest Quake</span>
-          <p className="text-base font-bold text-slate-900 mt-0.5 truncate">
+          <div className="text-base font-bold text-slate-900 mt-0.5 truncate">
             {isLoading ? (
               <LoadingSkeleton className="h-6 w-24" />
             ) : data?.nearestQuake ? (
@@ -111,7 +111,7 @@ export default function EarthquakesPage() {
             ) : (
               'None'
             )}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-500">
             {data?.nearestQuake ? `${data.nearestQuake.distanceKm} km (${data.nearestQuake.bearing})` : 'N/A'}
           </span>
@@ -119,7 +119,7 @@ export default function EarthquakesPage() {
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Max Magnitude</span>
-          <p className="text-base font-bold text-rose-600 mt-0.5">
+          <div className="text-base font-bold text-rose-600 mt-0.5">
             {isLoading ? (
               <LoadingSkeleton className="h-6 w-16" />
             ) : data?.maxMagnitudeQuake ? (
@@ -127,7 +127,7 @@ export default function EarthquakesPage() {
             ) : (
               'N/A'
             )}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400 truncate block">
             {data?.maxMagnitudeQuake ? data.maxMagnitudeQuake.place : 'N/A'}
           </span>
@@ -135,13 +135,13 @@ export default function EarthquakesPage() {
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Tsunami Advisories</span>
-          <p className="text-base font-bold text-slate-900 mt-0.5">
+          <div className="text-base font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <LoadingSkeleton className="h-6 w-10" />
             ) : (
               data?.earthquakes.filter((q) => q.tsunamiAlert).length ?? 0
             )}
-          </p>
+          </div>
           <span className="text-[10px] text-slate-400">USGS / PTWC Flags</span>
         </div>
       </div>
