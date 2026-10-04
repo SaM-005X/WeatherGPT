@@ -885,4 +885,67 @@ Stage 8 introduces full-spectrum severe weather advisory detection, convective t
 - **Safe Lifecycle Management**:
   - Markers stored in `stormMarkersRef` and systematically removed on toggle off, location change, or component unmount.
 
+---
+
+## 16. Geohazards Architecture (Stage 9)
+
+```text
+                                  [ User Location / Coordinates ]
+                                                 │
+      ┌──────────────────────────────────────────┼──────────────────────────────────────────┐
+      ▼                                          ▼                                          ▼
+[ Earthquakes Service ]                 [ Volcanoes Service ]                     [ Tsunamis Service ]
+(earthquakeService.ts)                  (volcanoService.ts)                       (tsunamiService.ts)
+  │ USGS GeoJSON 2.5_day / all_day        │ Smithsonian GVP & USGS VHP Reports      │ NOAA / PTWC Advisory Feed
+  │ Haversine Distance & Bearing          │ Aviation Color Codes & Status           │ Warning / Advisory / Watch Status
+  │ M2.5+, M4.5+, M6.0+ & Scope           │ Erupting vs Unrest Distinction          │ Basin Coverage & Safety Rules
+  │ 5-Minute Cache & Deduplication        │ 15-Minute Cache & Deduplication         │ 5-Minute Cache & Deduplication
+      │                                          │                                          │
+      ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+      ▼                                          ▼                                          ▼
+[ /earthquakes Page ]                   [ /volcanoes Page ]                       [ /tsunamis Page ]
+- Nearest Quake Card                    - Active Eruption Feed                    - Active Status Banner
+- Severity Badges & Depth               - Aviation Badges                         - Emergency Safety Rules
+- Distance/Bearing Filtered Feed        - Distance to Active Location             - Affected Ocean Basins
+      │                                          │
+      └──────────────────┬───────────────────────┘
+                         ▼
+          [ Leaflet Layer Groups ]
+          (WeatherMapInternal.tsx)
+          - "🌋 Earthquakes" Isolated LayerGroup (Scaled Concentric Circles & Popups)
+          - "🌋 Volcanoes" Isolated LayerGroup (Aviation Color Code Badges & Popups)
+          - Clean clearLayers() Execution on Toggle Off / Component Unmount
+```
+
+### 1. USGS Live Earthquakes Service (`src/lib/earthquakeService.ts`)
+- **Data Ingestion**: Real-time USGS GeoJSON feed (`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson` with fallback to `all_day.geojson`).
+- **Spatial Calculations**: Computes Haversine distance in km (`calculateHaversineDistanceKm`) and cardinal bearing (`calculateCardinalBearing`) from the user's `activeLocation`.
+- **Severity Classification**:
+  - `minor`: M < 4.5 (Green badge `#10b981`)
+  - `moderate`: 4.5 <= M < 6.0 (Amber badge `#f59e0b`)
+  - `strong`: 6.0 <= M < 7.0 (Orange badge `#f97316`)
+  - `major`: M >= 7.0 (Red badge `#ef4444`)
+- **Filtering Options**: Min magnitude (`all`, `m2.5`, `m4.5`, `m6.0`) and proximity scope (`local` <500km, `regional` <1500km, `global`).
+- **Caching & Resilience**: 5-minute memory cache (`EARTHQUAKE_CACHE_TTL_MS = 300_000`) and in-flight request deduplication.
+
+### 2. Smithsonian GVP / USGS Volcanoes Service (`src/lib/volcanoService.ts`)
+- **Data Normalization**: Ingests volcano activity reports, extracting name, country, coordinates, elevation, activity status, and Aviation Color Code (`GREEN`, `YELLOW`, `ORANGE`, `RED`).
+- **Status Distinction**: Strictly delineates between confirmed `Active Eruption` volcanoes (`isErupting`) and `Minor Activity / Unrest` / quiet volcanoes (`isUnrestOrErupting`).
+- **Proximity**: Calculates distance and cardinal bearing to `activeLocation`.
+- **Caching**: 15-minute memory cache (`VOLCANO_CACHE_TTL_MS = 900_000`) and deduplication.
+
+### 3. NOAA / PTWC Tsunamis Service (`src/lib/tsunamiService.ts`)
+- **Advisory Feed**: Ingests live NOAA National Tsunami Warning Center & PTWC bulletin feeds (`tsunami.gov`).
+- **Status Levels**: `WARNING`, `ADVISORY`, `WATCH`, `INFORMATION`, and `NO_ACTIVE`.
+- **Safety Protocol Engine**: Dynamically matches status level with actionable civilian emergency safety directives (evacuation, higher ground, shoreline recession warnings).
+- **Caching**: 5-minute memory cache (`TSUNAMI_CACHE_TTL_MS = 300_000`) and deduplication.
+
+### 4. Leaflet Geohazard Map Layers (`WeatherMapInternal.tsx`)
+- **Isolated Layer Groups**: Dedicated `earthquakeLayerGroupRef` and `volcanoLayerGroupRef` Leaflet `LayerGroup` instances attached to `mapInstanceRef.current`.
+- **Toggle Control**: Top-left map controls bar buttons `🌋 Earthquakes` and `🌋 Volcanoes` with active state indicators.
+- **Marker Design**:
+  - Earthquakes: Concentric SVG DivIcons with magnitude-scaled radius and pulsing animated shockwaves.
+  - Volcanoes: Emoji DivIcon markers surrounded by an Aviation Color Code border ring.
+- **Clean Teardown**: Explicit `clearLayers()` on layer toggle off and component unmount, strictly preserving existing map layers (Radar, Wind, Clouds, Satellite, Storms).
+
 

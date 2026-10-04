@@ -64,6 +64,9 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 [Stage 8] Severe Weather Alerts, Thunderstorm Tracking & Resilience (COMPLETED)
     │
     ▼
+[Stage 9] Geohazards Architecture — Earthquakes, Volcanoes & Tsunamis (COMPLETED)
+    │
+    ▼
 [Phase 10] Docker Containerization (Dockerfile & Image Verification — PENDING / NEXT)
     │
     ▼
@@ -467,6 +470,35 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 
 ---
 
+### Stage 9: Geohazards Architecture (Earthquakes, Volcanoes & Tsunamis)
+- **Status**: **Completed**
+- **Goal**: Build live geohazards domain services, UI views (`/earthquakes`, `/volcanoes`, `/tsunamis`), and isolated Leaflet map overlay layers.
+- **Completed Deliverables**:
+  - **Earthquakes Service (`earthquakeService.ts`) & `/earthquakes` UI**:
+    - Real-time USGS GeoJSON feed integration (`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson` with `all_day.geojson` fallback).
+    - Haversine distance & cardinal bearing calculations to active user location.
+    - Color-graded magnitude severity badges (`minor`, `moderate`, `strong`, `major`) and depth indicators.
+    - Magnitude (M2.5+, M4.5+, M6.0+) and scope filters (Local <500km, Regional <1500km, Global).
+    - 5-minute memory cache & in-flight request deduplication.
+  - **Volcanoes Service (`volcanoService.ts`) & `/volcanoes` UI**:
+    - Ingested Smithsonian GVP / USGS Volcanic Hazards public reports.
+    - Normalized Aviation Color Codes (`GREEN`, `YELLOW`, `ORANGE`, `RED`) and active eruption vs. unrest distinction.
+    - Calculated distance and bearing to active user location.
+    - 15-minute memory cache & deduplication.
+  - **Tsunamis Service (`tsunamiService.ts`) & `/tsunamis` UI**:
+    - NOAA / PTWC active tsunami message feed ingestion (`tsunami.gov`).
+    - Standard status level normalization (`WARNING`, `ADVISORY`, `WATCH`, `INFORMATION`, `NO_ACTIVE`).
+    - Actionable emergency safety guidelines engine and affected ocean basins list.
+    - 5-minute memory cache & deduplication.
+  - **Leaflet Map Overlays (`WeatherMapInternal.tsx`)**:
+    - Toggleable top-left map controls buttons `🌋 Earthquakes` and `🌋 Volcanoes`.
+    - Concentric SVG circle markers for quakes scaled to magnitude; emoji markers with Aviation Color Code rings for volcanoes.
+    - Isolated Leaflet `LayerGroup` instances executing clean `clearLayers()` on toggle off and unmount.
+  - **Automated Test Suite**:
+    - `src/tests/geohazards.test.ts` covering spatial math, GeoJSON parsing, color codes, status levels, caching, deduplication, and layer unmount safety (6/6 passed).
+
+---
+
 ### Phase 10: Docker Containerization
 - **Status**: **Pending (Strictly Deferred to Phase 10)**
 - **Goal**: Create and verify production multi-stage `Dockerfile.frontend` generating a standalone Next.js container image.
@@ -490,15 +522,16 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 
 ## Placeholder Routes & Scope Clarification
 
-During **Step 1 (Navigation Shell & Global Location Context)**, the navigation header (`TopNav.tsx`) and 8 sub-routes were created to establish a multi-page shell. Their current implementation status is:
+During **Step 1 (Navigation Shell & Global Location Context)**, the navigation header (`TopNav.tsx`) and sub-routes were created to establish a multi-page shell. Their current implementation status is:
 
 | Route | UI Title | Stated Data Source | Current Code Status | Canonical Classification |
 | :--- | :--- | :--- | :--- | :--- |
 | **`/nowcast`** | Precipitation Nowcast | Open-Meteo `minutely_15` | **Fully Implemented** (Live 15-min projection, bar chart, badges) | **Core Feature (Completed Stage 5/6)** |
 | **`/alerts`** | Severe Weather Alerts | US NWS & Open-Meteo Synoptic | **Fully Implemented** (Live color cards, drawer, 5m cache) | **Core Feature (Completed Stage 8)** |
 | **`/storms`** | Convective & Thunderstorm | Open-Meteo WMO & Convective | **Fully Implemented** (Live gauge, regional cells, map layer) | **Core Feature (Completed Stage 8)** |
-| **`/earthquakes`** | Global Earthquake Tracker | USGS GeoJSON Feed | Static UI card with dummy metrics; no fetcher | **UI Placeholder / Future Expansion** |
-| **`/volcanoes`** | Volcano Activity & Eruptions | Smithsonian GVP / USGS | Static UI card with dummy metrics; no fetcher | **UI Placeholder / Future Expansion** |
+| **`/earthquakes`** | Global Earthquake Tracker | USGS GeoJSON Feed | **Fully Implemented** (Live quakes feed, filters, map layer) | **Core Feature (Completed Stage 9)** |
+| **`/volcanoes`** | Volcano Activity & Eruptions | Smithsonian GVP / USGS | **Fully Implemented** (Live volcanoes feed, aviation codes, map layer) | **Core Feature (Completed Stage 9)** |
+| **`/tsunamis`** | Tsunami Advisories | NOAA / PTWC Bulletin | **Fully Implemented** (Live advisories banner, ocean basins, safety rules) | **Core Feature (Completed Stage 9)** |
 | **`/activities`** | Weather Activities & Lifestyle | Multi-variable comfort rules | Static UI card with dummy sports; no scoring engine | **UI Placeholder / Future Feature** |
 | **`/air-quality`**| Air Quality & Environment | Open-Meteo Air Quality | Static UI card with dummy AQI scales; no fetcher | **UI Placeholder / Future Feature** |
 | **`/astronomy`** | Sun & Moon Astronomy | Open-Meteo / SunCalc | Static UI card with dummy sun/moon items; no fetcher | **UI Placeholder / Future Feature** |

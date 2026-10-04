@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx src/tests/weatherService.test.ts && tsx src/tests/geocodingService.test.ts && tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts && tsx --env-file=.env.local src/tests/phase41Verification.test.ts && tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts && tsx --env-file=.env.local src/tests/graphql.test.ts && tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts && tsx --env-file=.env.local src/tests/weatherFreshness.test.ts && tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts && tsx src/tests/inFlightAbortRegression.test.ts && tsx src/tests/rainViewerService.test.ts && tsx src/tests/radarNowcast.test.ts && tsx src/tests/windSatelliteLayers.test.ts && tsx src/tests/alertsStorms.test.ts && tsx --env-file=.env.local src/tests/weatherChatbot.test.ts && tsx src/tests/performanceLatency.test.ts",
+    "test": "tsx src/tests/weatherService.test.ts && tsx src/tests/geocodingService.test.ts && tsx --env-file=.env.local src/tests/supabaseIntegration.test.ts && tsx --env-file=.env.local src/tests/phase41Verification.test.ts && tsx --env-file=.env.local src/tests/step1CleanupRegression.test.ts && tsx --env-file=.env.local src/tests/graphql.test.ts && tsx --env-file=.env.local src/tests/lambdaIntegration.test.ts && tsx --env-file=.env.local src/tests/weatherFreshness.test.ts && tsx --env-file=.env.local src/tests/freshnessBugInvestigation.test.ts && tsx src/tests/inFlightAbortRegression.test.ts && tsx src/tests/rainViewerService.test.ts && tsx src/tests/radarNowcast.test.ts && tsx src/tests/windSatelliteLayers.test.ts && tsx src/tests/alertsStorms.test.ts && tsx src/tests/geohazards.test.ts && tsx --env-file=.env.local src/tests/weatherChatbot.test.ts && tsx src/tests/performanceLatency.test.ts",
 
+    "test:geohazards": "tsx src/tests/geohazards.test.ts",
     "test:alerts": "tsx src/tests/alertsStorms.test.ts",
     "test:radar": "tsx src/tests/rainViewerService.test.ts && tsx src/tests/radarNowcast.test.ts",
     "test:layers": "tsx src/tests/windSatelliteLayers.test.ts",

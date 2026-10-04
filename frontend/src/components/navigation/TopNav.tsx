@@ -41,10 +41,12 @@ const NAV_CATEGORIES: NavCategory[] = [
     items: [
       { name: 'Earthquakes', href: '/earthquakes', icon: '🌋', description: 'USGS live global seismic feed & map' },
       { name: 'Volcanoes', href: '/volcanoes', icon: '🌋', description: 'Smithsonian GVP active eruptions & unrest' },
+      { name: 'Tsunamis', href: '/tsunamis', icon: '🌊', description: 'NOAA PTWC live tsunami advisories' },
       { name: 'Severe Alerts', href: '/alerts', icon: '⚠️', description: 'Watches, warnings & regional bulletins' },
       { name: 'Storm Tracker', href: '/storms', icon: '🌀', description: 'Tropical cyclones & hurricane forecast cones' },
     ],
   },
+
 ];
 
 export function TopNav() {

@@ -22,6 +22,8 @@ import {
 import type { WeatherReport } from '@/types/weather';
 import { fetchWeatherData, weatherCache, getCacheKey, getWeatherCacheKey } from '@/lib/weatherService';
 import { fetchStormData, StormReport } from '@/lib/stormService';
+import { fetchEarthquakes } from '@/lib/earthquakeService';
+import { fetchVolcanoes, parseAviationColorCode } from '@/lib/volcanoService';
 
 
 export interface LayerState {
@@ -30,6 +32,8 @@ export interface LayerState {
   clouds: boolean;
   satellite: boolean;
   storms?: boolean;
+  earthquakes?: boolean;
+  volcanoes?: boolean;
 }
 
 interface WeatherMapInternalProps {
@@ -119,6 +123,8 @@ export default function WeatherMapInternal({
   const windMarkerRef = useRef<L.Marker | null>(null);
   const windGridLayerRef = useRef<L.LayerGroup | null>(null);
   const stormLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const earthquakeLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const volcanoLayerGroupRef = useRef<L.LayerGroup | null>(null);
 
   const isMountedRef = useRef<boolean>(true);
   const radarRequestVersionRef = useRef<number>(0);
@@ -151,6 +157,10 @@ export default function WeatherMapInternal({
   const [isStormActive, setIsStormActive] = useState<boolean>(false);
   const [stormData, setStormData] = useState<StormReport | null>(null);
 
+  // Geohazards Layer State
+  const [isEarthquakeActive, setIsEarthquakeActive] = useState<boolean>(false);
+  const [isVolcanoActive, setIsVolcanoActive] = useState<boolean>(false);
+
   // Synchronize layer state with parent component
   useEffect(() => {
     onLayerStateChange?.({
@@ -159,8 +169,10 @@ export default function WeatherMapInternal({
       clouds: isCloudActive,
       satellite: isSatelliteActive,
       storms: isStormActive,
+      earthquakes: isEarthquakeActive,
+      volcanoes: isVolcanoActive,
     });
-  }, [isRadarActive, isWindActive, isCloudActive, isSatelliteActive, isStormActive, onLayerStateChange]);
+  }, [isRadarActive, isWindActive, isCloudActive, isSatelliteActive, isStormActive, isEarthquakeActive, isVolcanoActive, onLayerStateChange]);
 
   // ---------------------------------------------------------------------------
   // 1. Doppler Radar Effects & Handlers
@@ -577,6 +589,16 @@ export default function WeatherMapInternal({
           mapInstanceRef.current.removeLayer(stormLayerGroupRef.current);
           stormLayerGroupRef.current = null;
         }
+        if (earthquakeLayerGroupRef.current) {
+          earthquakeLayerGroupRef.current.clearLayers();
+          mapInstanceRef.current.removeLayer(earthquakeLayerGroupRef.current);
+          earthquakeLayerGroupRef.current = null;
+        }
+        if (volcanoLayerGroupRef.current) {
+          volcanoLayerGroupRef.current.clearLayers();
+          mapInstanceRef.current.removeLayer(volcanoLayerGroupRef.current);
+          volcanoLayerGroupRef.current = null;
+        }
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerRef.current = null;
@@ -710,6 +732,145 @@ export default function WeatherMapInternal({
     };
   }, [isStormActive, latitude, longitude]);
 
+  // ---------------------------------------------------------------------------
+  // 6. Earthquakes Layer Effect
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+
+    if (!isEarthquakeActive) {
+      if (earthquakeLayerGroupRef.current) {
+        earthquakeLayerGroupRef.current.clearLayers();
+        mapInstanceRef.current.removeLayer(earthquakeLayerGroupRef.current);
+        earthquakeLayerGroupRef.current = null;
+      }
+      return;
+    }
+
+    let isCancelled = false;
+    if (!earthquakeLayerGroupRef.current) {
+      earthquakeLayerGroupRef.current = L.layerGroup().addTo(mapInstanceRef.current);
+    }
+    earthquakeLayerGroupRef.current.clearLayers();
+
+    fetchEarthquakes(latitude, longitude)
+      .then((data) => {
+        if (isCancelled || !earthquakeLayerGroupRef.current) return;
+
+        for (const quake of data.earthquakes) {
+          const color =
+            quake.severity === 'major'
+              ? '#ef4444'
+              : quake.severity === 'strong'
+              ? '#f97316'
+              : quake.severity === 'moderate'
+              ? '#f59e0b'
+              : '#10b981';
+
+          const radius = Math.max(16, Math.min(44, Math.round(quake.magnitude * 6)));
+
+          const icon = L.divIcon({
+            className: 'earthquake-marker-icon',
+            html: `
+              <div style="position: relative; width: ${radius}px; height: ${radius}px; display: flex; align-items: center; justify-content: center;">
+                <div style="position: absolute; inset: 0; border-radius: 50%; background: ${color}; opacity: 0.25; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+                <div style="position: relative; width: ${Math.round(radius * 0.7)}px; height: ${Math.round(radius * 0.7)}px; border-radius: 50%; background: ${color}; color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                  M${quake.magnitude.toFixed(1)}
+                </div>
+              </div>
+            `,
+            iconSize: [radius, radius],
+            iconAnchor: [radius / 2, radius / 2],
+            popupAnchor: [0, -radius / 2],
+          });
+
+          const popupContent = `
+            <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4; min-width: 180px;">
+              <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">
+                🌋 M${quake.magnitude.toFixed(1)} ${quake.place}
+              </div>
+              <div style="color: #475569;">Depth: <strong>${quake.depth.toFixed(1)} km</strong></div>
+              <div style="color: #475569;">Distance: <strong>${quake.distanceKm} km (${quake.bearing})</strong></div>
+              <div style="color: #64748b; font-size: 11px; margin-top: 2px;">${new Date(quake.time).toLocaleString()}</div>
+            </div>
+          `;
+
+          const marker = L.marker([quake.latitude, quake.longitude], { icon }).bindPopup(popupContent);
+          earthquakeLayerGroupRef.current.addLayer(marker);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isEarthquakeActive, latitude, longitude]);
+
+  // ---------------------------------------------------------------------------
+  // 7. Volcanoes Layer Effect
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+
+    if (!isVolcanoActive) {
+      if (volcanoLayerGroupRef.current) {
+        volcanoLayerGroupRef.current.clearLayers();
+        mapInstanceRef.current.removeLayer(volcanoLayerGroupRef.current);
+        volcanoLayerGroupRef.current = null;
+      }
+      return;
+    }
+
+    let isCancelled = false;
+    if (!volcanoLayerGroupRef.current) {
+      volcanoLayerGroupRef.current = L.layerGroup().addTo(mapInstanceRef.current);
+    }
+    volcanoLayerGroupRef.current.clearLayers();
+
+    fetchVolcanoes(latitude, longitude)
+      .then((data) => {
+        if (isCancelled || !volcanoLayerGroupRef.current) return;
+
+        for (const volcano of data.volcanoes) {
+          const badgeColor = parseAviationColorCode(volcano.colorCode).hex;
+
+          const icon = L.divIcon({
+            className: 'volcano-marker-icon',
+            html: `
+              <div style="position: relative; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;">
+                <div style="position: absolute; inset: 0; border-radius: 50%; border: 3px solid ${badgeColor}; background: rgba(0,0,0,0.1);"></div>
+                <div style="position: relative; width: 22px; height: 22px; border-radius: 50%; background: #1e293b; color: white; display: flex; align-items: center; justify-content: center; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                  🌋
+                </div>
+              </div>
+            `,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+            popupAnchor: [0, -15],
+          });
+
+          const popupContent = `
+            <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4; min-width: 180px;">
+              <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">
+                🌋 ${volcano.name} (${volcano.country})
+              </div>
+              <div style="color: #475569;">Aviation Code: <strong style="color: ${badgeColor};">${volcano.colorCode}</strong></div>
+              <div style="color: #475569;">Status: <strong>${volcano.status}</strong></div>
+              <div style="color: #475569;">Distance: <strong>${volcano.distanceKm} km (${volcano.bearing})</strong></div>
+            </div>
+          `;
+
+          const marker = L.marker([volcano.latitude, volcano.longitude], { icon }).bindPopup(popupContent);
+          volcanoLayerGroupRef.current.addLayer(marker);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isVolcanoActive, latitude, longitude]);
+
   // Cloud coverage description helper
   const getCloudCategory = (cover?: number) => {
     if (cover === undefined) return 'Unavailable';
@@ -820,6 +981,40 @@ export default function WeatherMapInternal({
             <span>⚡</span>
             <span>Storms</span>
             {isStormActive && <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />}
+          </button>
+
+          {/* Earthquakes Layer Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsEarthquakeActive((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold shadow-xs transition-colors cursor-pointer border ${
+              isEarthquakeActive
+                ? 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title="Toggle Live USGS Earthquakes Layer"
+            aria-pressed={isEarthquakeActive}
+          >
+            <span>🌋</span>
+            <span>Earthquakes</span>
+            {isEarthquakeActive && <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />}
+          </button>
+
+          {/* Volcanoes Layer Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsVolcanoActive((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold shadow-xs transition-colors cursor-pointer border ${
+              isVolcanoActive
+                ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title="Toggle Smithsonian GVP / USGS Volcanoes Layer"
+            aria-pressed={isVolcanoActive}
+          >
+            <span>🌋</span>
+            <span>Volcanoes</span>
+            {isVolcanoActive && <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
           </button>
 
           {radarError && (

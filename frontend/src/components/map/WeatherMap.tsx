@@ -148,6 +148,8 @@ export function WeatherMap({
     clouds: false,
     satellite: false,
     storms: false,
+    earthquakes: false,
+    volcanoes: false,
   });
 
   const handleLayerStateChange = useCallback(

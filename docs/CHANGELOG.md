@@ -5,6 +5,36 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-10-04 — Stage 9: Geohazards Architecture (Earthquakes, Volcanoes & Tsunamis)
+
+### Added & Enhanced
+- **USGS Live Earthquakes Service (`frontend/src/lib/earthquakeService.ts` & `/earthquakes` Page)**:
+  - Created `earthquakeService.ts` integrating USGS GeoJSON real-time seismic feed (`2.5_day.geojson` with fallback to `all_day.geojson`).
+  - Implemented Haversine distance & cardinal bearing calculations relative to user `activeLocation`.
+  - Color-graded magnitude severity badges (`minor`, `moderate`, `strong`, `major`) and depth indicators.
+  - Magnitude filters (M2.5+, M4.5+, M6.0+) and proximity scope filters (Local <500km, Regional <1500km, Global).
+  - 5-minute memory cache & in-flight request deduplication.
+  - Built live `/earthquakes` page (`frontend/src/app/earthquakes/page.tsx`) with nearest quake card, magnitude badges, and seismic feed.
+- **Smithsonian GVP / USGS Volcanoes Service (`frontend/src/lib/volcanoService.ts` & `/volcanoes` Page)**:
+  - Created `volcanoService.ts` ingesting Smithsonian GVP & USGS Volcanic Hazards reports.
+  - Normalized Aviation Color Codes (`GREEN`, `YELLOW`, `ORANGE`, `RED`) and active eruption vs. unrest activity distinction.
+  - Calculated distance and bearing to active user location with 15-minute memory caching.
+  - Built live `/volcanoes` page (`frontend/src/app/volcanoes/page.tsx`) with active eruption feed, aviation badges, and status metrics.
+- **NOAA / PTWC Tsunamis Service (`frontend/src/lib/tsunamiService.ts` & `/tsunamis` Page)**:
+  - Created `tsunamiService.ts` ingesting live NOAA / PTWC bulletin feeds (`tsunami.gov`).
+  - Parsed official status levels (`WARNING`, `ADVISORY`, `WATCH`, `INFORMATION`, `NO_ACTIVE`).
+  - Built emergency safety guidelines engine and affected ocean basins display.
+  - Created live `/tsunamis` page (`frontend/src/app/tsunamis/page.tsx`) and added `Tsunamis` link to main navigation.
+- **Leaflet Geohazards Map Overlay Layers (`WeatherMapInternal.tsx` & `WeatherMap.tsx`)**:
+  - Added toggleable top-left map controls buttons `🌋 Earthquakes` and `🌋 Volcanoes`.
+  - Concentric circle SVG markers scaled to magnitude for quakes; emoji DivIcon markers with Aviation Color Code border rings for volcanoes.
+  - Dedicated Leaflet `LayerGroup` instances executing clean `clearLayers()` teardown on toggle off or unmount without touching existing layers.
+- **Testing & Quality Assurance**:
+  - Created automated test suite `frontend/src/tests/geohazards.test.ts` (6/6 tests passed).
+  - Registered `test:geohazards` in `package.json`.
+
+---
+
 ## [1.9.0] - 2026-10-01 — Stage 8: Severe Weather Alerts, Thunderstorm Tracking & Service Resilience
 
 ### Added & Enhanced

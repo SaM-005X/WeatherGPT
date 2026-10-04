@@ -233,6 +233,13 @@ export function getAppSyncApiKey(): string | undefined {
 }
 
 /**
+ * Timeout window for AppSync GraphQL requests before gracefully falling back.
+ * Set to 8000ms (8 seconds) to accommodate cross-region cold-start latency (e.g. India -> us-east-1).
+ */
+export const APPSYNC_TIMEOUT_MS = 8000;
+
+
+/**
  * Normalizes GraphQL response to client WeatherReport model.
  */
 function normalizeWeatherReport(report: GraphQLWeatherReport): WeatherReport {
@@ -369,11 +376,11 @@ export async function fetchWeatherByCoordinates(
       headers['x-api-key'] = apiKey;
     }
 
-    // 4500ms timeout controller for AppSync fast-fail
+    // 8000ms timeout controller for AppSync fast-fail (accommodates cross-region cold-start latency)
     const timeoutController = new AbortController();
     const timeoutTimer = setTimeout(() => {
-      timeoutController.abort(new Error('AppSync timeout after 4500ms'));
-    }, 4500);
+      timeoutController.abort(new Error(`AppSync timeout after ${APPSYNC_TIMEOUT_MS}ms`));
+    }, APPSYNC_TIMEOUT_MS);
 
     // Merge options.signal with internal timeoutController
     let removeCallerAbortListener: (() => void) | undefined;
@@ -384,7 +391,7 @@ export async function fetchWeatherByCoordinates(
           throw new DOMException('The user aborted a request.', 'AbortError');
         }
         // If fallback is enabled, switch silently to direct service fallback
-        console.warn('[GraphQLClient] Caller signal already aborted, executing direct fallback.');
+        console.info('[GraphQLClient] Caller signal already aborted, executing direct fallback.');
         return await fetchWeatherData(latitude, longitude, {
           forceRefresh: options.forceRefresh,
         });
@@ -440,18 +447,19 @@ export async function fetchWeatherByCoordinates(
       // Graceful fallback to direct weatherService if enabled (default true)
       if (options?.fallbackToDirect !== false) {
         try {
-          console.warn(
-            `[GraphQLClient] AppSync request failed or timed out (${
+          console.info(
+            `[GraphQLClient] AppSync request transitioning to direct service (${
               err instanceof Error ? err.message : String(err)
-            }), executing direct fallback.`
+            }).`
           );
           return await fetchWeatherData(latitude, longitude, {
             forceRefresh: options?.forceRefresh,
           });
         } catch (fallbackErr: unknown) {
-          console.warn('[GraphQLClient] Direct fallback also failed:', fallbackErr);
+          console.warn('[GraphQLClient] Direct fallback failed:', fallbackErr);
         }
       }
+
 
       // If user/caller explicitly cancelled the request and fallback was disabled
       if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
