@@ -70,10 +70,10 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 [Phase 10] Docker Containerization (COMPLETED)
     │
     ▼
-[Phase 11] Cloudflare Edge & HTTPS (Simple DNS, Full Strict SSL, Asset CDN — PENDING / NEXT)
+[Phase 11] Cloudflare Edge & HTTPS (COMPLETED)
     │
     ▼
-[Phase 12] Testing & Final Verification (PENDING)
+[Phase 12] Testing & Final Verification (PENDING / NEXT)
 ```
 
 ---
@@ -582,9 +582,22 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 ---
 
 ### Phase 11: Cloudflare Edge & HTTPS
-- **Status**: **Pending (Target Infrastructure Milestone)**
-- **Goal**: Configure DNS management, Full (Strict) SSL termination, and static asset edge CDN caching.
-- **Scope Boundary**: Cloudflare is an **infrastructure milestone**. Product features (e.g. alerts) must NOT be merged into Phase 11.
+- **Status**: **Completed**
+- **Goal**: Configure DNS management, Full (Strict) SSL termination, static asset edge CDN caching, and production security headers.
+- **Completed Deliverables**:
+  - **Next.js Production Edge Headers (`frontend/next.config.ts`)**:
+    - Configured HSTS (`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`).
+    - Configured defense-in-depth headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`.
+    - Applied 1-year immutable caching (`public, max-age=31536000, immutable`) for `/_next/static/*` and static media assets, enabling Cloudflare edge caching (`HIT`).
+    - Added dynamic route protection (`Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache`) for `/api/*` to bypass edge cache.
+  - **Cloudflare Production Runbook (`docs/CLOUDFLARE.md`)**:
+    - Documented DNS configuration (`@` and `www` with Orange Cloud proxy enabled).
+    - Detailed Full (Strict) SSL mode architecture and Cloudflare Origin CA certificate installation.
+    - Specified edge cache rules matrix (Static `HIT` vs Dynamic `DYNAMIC`).
+    - Documented troubleshooting procedures for Cloudflare Errors 525, 520, 521, and 522, along with `curl` verification commands.
+  - **Deployment & Architecture Documentation**:
+    - Updated `docs/DEPLOYMENT.md` to reference the completed Phase 11 edge architecture.
+    - Added Section 19: Edge & CDN Architecture to `docs/ARCHITECTURE.md`.
 
 ---
 

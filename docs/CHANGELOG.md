@@ -5,6 +5,26 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-10-04 — Phase 11: Cloudflare Edge & Production HTTPS
+
+### Added
+- **Next.js Production Edge & Security Headers (`frontend/next.config.ts`)**:
+  - Implemented HTTP Strict Transport Security: `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` for browser-enforced HTTPS.
+  - Implemented defense-in-depth headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+  - Added 1-year immutable caching (`public, max-age=31536000, immutable`) for `/_next/static/*` and static media assets (`.svg`, `.png`, `.jpg`, `.ico`, `.woff2`) enabling Cloudflare Edge `HIT` responses.
+  - Added dynamic route protection headers (`no-store, no-cache, must-revalidate` + `Pragma: no-cache`) for `/api/*` to guarantee fresh, un-cached responses for live weather telemetry, geohazards, and AI chatbot inference.
+- **Dedicated Cloudflare Operational Runbook (`docs/CLOUDFLARE.md`)**:
+  - Documented DNS configuration: root (`@`) and `www` CNAME/A records with `Proxied (Orange Cloud)` status.
+  - Documented Full (Strict) SSL/TLS architecture, Cloudflare Origin CA certificate installation, and automated HTTP-to-HTTPS redirect.
+  - Established Edge Cache Rules matrix distinguishing static chunk caching (`HIT`) from dynamic application routes (`DYNAMIC`).
+  - Detailed diagnostic procedures for Cloudflare Errors 525, 520, 521, and 522 along with edge curl verification commands.
+- **Architecture & Deployment Documentation**:
+  - Updated `docs/DEPLOYMENT.md` Section 2 with Phase 11 edge proxy synchronization.
+  - Added Section 19: Edge & CDN Architecture to `docs/ARCHITECTURE.md` and updated Section 1 architectural principles.
+  - Marked Phase 11 as completed in `docs/ROADMAP.md`.
+
+---
+
 ## [1.12.0] - 2026-10-04 — Phase 10: Production Docker Containerization
 
 ### Added

@@ -11,6 +11,7 @@
 7. **Serverless on AWS (Local Foundation / AppSync IaC Canonicalization)**: The Phase 6 serverless foundation (`backend/` with Lambda, API Gateway v2, EventBridge, CloudWatch) was verified locally; actual cloud provisioning remains deferred. For Phase 8.5 AppSync, AWS SAM (`backend/template.yaml`) is the single canonical IaC definition, while `backend/serverless.yml` remains frozen at the Phase 6 foundation.
 8. **Focused Weather Chatbot (Partially Implemented Preview / Future Phase 9 AI)**: Simple weather-topic guardrail ensuring the assistant only answers weather questions using trusted data. The frontend UI preview and typed GraphQL contract stub exist today; real LLM integration and server-side guardrail enforcement are planned for Phase 9.
 9. **Interactive Mapping & Doppler Radar (Implemented in Phase 8)**: Keyless Leaflet mapping, live RainViewer Doppler radar tile overlay with lifecycle management, real-time Cloud Cover HUD, and multi-instance coordinate synchronization.
+10. **Edge Acceleration & Production Security (Implemented in Phase 11)**: Cloudflare Anycast edge layer enforcing Full (Strict) SSL, automatic HTTP-to-HTTPS redirection, browser-enforced HSTS (`max-age=63072000`), defense-in-depth headers, and 1-year immutable edge caching for static assets with dynamic API bypass.
 
 ---
 
@@ -1087,6 +1088,45 @@ To prevent environment leakage while ensuring dynamic portability, variables are
 - **Startup Latency**: Server boots in < 1ms (`✓ Ready in 0ms`, `✓ Running next.config took 1.1ms`).
 - **Route Availability**: 100% operational parity across all 18 routes (`/`, `/air-quality`, `/activities`, `/alerts`, `/astronomy`, `/earthquakes`, `/volcanoes`, `/tsunamis`, `/storms`, `/nowcast`, `/maps`, `/hourly`, `/forecast`, etc.) and dynamic API routes (`/api/chat`, `/api/graphql`).
 - **Host Workflow Preservation**: Local development (`npm run dev`), unit tests (`npm test`), and local compilation (`npm run build`) remain 100% functional without Docker overhead.
+
+---
+
+## 19. Edge & CDN Architecture (Cloudflare + Next.js Headers — Phase 11)
+
+```
+[ User Browser ]
+       │ HTTPS / 443
+       ▼
+[ Cloudflare Global Anycast Edge Network ]
+       ├── Full (Strict) SSL / TLS 1.3 Termination
+       ├── HSTS & Security Headers Injection
+       ├── Static Asset Cache HIT (/_next/static/*, 1yr immutable)
+       └── DDoS Mitigation & IP Masking
+       │
+       ▼ (Origin HTTPS Request)
+[ Standalone Next.js Docker Container ]
+       ├── Standalone Node Server (Port 3000)
+       ├── 18 Application Routes
+       └── API Handlers (/api/chat, /api/graphql with no-store)
+```
+
+### 19.1 Edge Architecture & Simplicity Constraint
+WeatherGPT adheres strictly to the Cloudflare Simplicity Constraint:
+- **No Edge Compute Bloat**: Cloudflare Workers, edge databases (D1/KV), and edge middleware are avoided. The edge acts strictly as a high-performance CDN, SSL termination proxy, and DDoS barrier.
+- **Full (Strict) SSL Termination**: End-to-end encryption from browser to edge, and edge to origin, validated via Cloudflare Origin CA certificates.
+- **HSTS Preload & Security Headers**: Next.js automatically outputs `Strict-Transport-Security` (2-year preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+
+### 19.2 Edge Caching & Cache-Control Policies
+Deterministic caching headers configured in `frontend/next.config.ts`:
+1. **Immutable Static Chunks (`/_next/static/:path*`)**:
+   - `Cache-Control: public, max-age=31536000, immutable`.
+   - Edge nodes cache chunks globally; client browsers never refetch hash-named static assets.
+2. **Dynamic API & Telemetry Routes (`/api/:path*`)**:
+   - `Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache`.
+   - Prevents stale responses for live weather telemetry, geohazard updates, and AI chatbot streaming.
+3. **Application Route HTML (`/`, `/air-quality`, `/alerts`, etc.)**:
+   - Delivered dynamically (`s-maxage=0`) to ensure instant client-side hydration with fresh local storage and geolocation coordinates.
+
 
 
 

@@ -7,11 +7,11 @@
 > - Current application status: Fully developed, executed, and verified **locally**.
 > - **AWS Cloud Deployment**: Currently **DEFERRED / UNPROVISIONED** (AppSync & SAM templates configured locally).
 > - **Docker Containerization**: **COMPLETED & VERIFIED (Phase 10)**.
-> - **Cloudflare Edge**: Planned for **Phase 11**.
+> - **Cloudflare Edge & Production HTTPS**: **COMPLETED & CONFIGURED (Phase 11)** — See [docs/CLOUDFLARE.md](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md).
 
 The target production topology consists of:
-- **Cloudflare (Phase 11 Target)**: DNS management, Full (Strict) SSL/HTTPS termination, and static asset CDN.
-- **Frontend Container Hosting**: Next.js multi-stage standalone Docker container (`weathergpt-frontend:latest`) deployed to container runners (e.g. AWS App Runner, ECS/Fargate, or Docker host).
+- **Cloudflare Edge (Phase 11)**: Global Anycast DNS management, Full (Strict) SSL/HTTPS termination, HSTS security headers, and 1-year immutable edge CDN static caching.
+- **Frontend Container Hosting (Phase 10)**: Next.js multi-stage standalone Docker container (`weathergpt-frontend:latest`) deployed to container runners (e.g. AWS App Runner, ECS/Fargate, or Docker host).
 - **Backend Hosting (AWS Lambda Target)**: AWS Lambda behind AWS AppSync / API Gateway (HTTP API v2).
 - **Database (Supabase PostgreSQL)**: Managed PostgreSQL hosting `locations` and `geocoding_cache` tables with Row Level Security.
 
@@ -25,17 +25,25 @@ The target production topology consists of:
 
 ---
 
-## 2. Cloudflare Configuration (Target Phase 11)
+## 2. Cloudflare Configuration & Edge Architecture (Phase 11)
 
-1. **DNS Management**:
-   - Add `A` or `CNAME` records pointing to the frontend container host and AWS API Gateway.
-   - Enable Cloudflare Proxy (`Proxied: Orange Cloud`).
-2. **SSL/TLS Settings**:
-   - Mode: **Full (Strict)**.
-   - Always Use HTTPS: **Enabled** (redirects HTTP traffic to HTTPS).
-3. **Static Caching**:
-   - Static assets (`/_next/static/*`) are automatically cached by Cloudflare's global edge network.
+For the complete production edge operational runbook, origin CA setup, and troubleshooting guide, see **[`docs/CLOUDFLARE.md`](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md)**.
+
+1. **DNS & Proxy Management**:
+   - `A` record (`@`) pointing to container origin IP with `Proxied: Orange Cloud` enabled.
+   - `CNAME` record (`www`) pointing to `@` with `Proxied: Orange Cloud` enabled.
    - Dynamic `/api/graphql` and `/api/chat` requests pass through directly to the backend.
+2. **SSL/TLS Settings**:
+   - Mode: **Full (Strict)** with Cloudflare Origin CA certificate on origin reverse proxy.
+   - Always Use HTTPS: **Enabled** (redirects HTTP traffic to HTTPS).
+   - Minimum TLS Version: **TLS 1.2** or **TLS 1.3**.
+3. **Edge Security & Cache Headers (configured in `frontend/next.config.ts`)**:
+   - `Strict-Transport-Security`: `max-age=63072000; includeSubDomains; preload`
+   - `X-Content-Type-Options`: `nosniff`
+   - `X-Frame-Options`: `SAMEORIGIN`
+   - `Referrer-Policy`: `strict-origin-when-cross-origin`
+   - `Cache-Control`: `public, max-age=31536000, immutable` on `/_next/static/*` (Cloudflare Edge Cache `HIT`)
+   - `Cache-Control`: `no-store, no-cache, must-revalidate` on `/api/*` (Cloudflare Edge Cache `DYNAMIC`)
 
 ---
 
@@ -107,5 +115,5 @@ docker logs weathergpt-app
 
 1. **Supabase**: Execute migrations (`supabase/migrations/20260925000000_create_locations_and_geocoding_cache.sql`) to set up `locations`, `geocoding_cache`, and RLS policies.
 2. **AWS Lambda / AppSync**: Deploy serverless backend using AWS SAM (`backend/template.yaml`) with secrets configured in AWS SSM Parameter Store (`/weather-gpt/prod/*`).
-3. **Frontend Docker Container**: Build and deploy `weathergpt-frontend:latest` to container host (AWS App Runner or ECS) with environment variables configured.
-4. **Cloudflare**: Route custom domain via Cloudflare with Full (Strict) SSL and edge CDN caching.
+3. **Frontend Docker Container**: Build and deploy `weathergpt-frontend:latest` to container host (AWS App Runner, ECS/Fargate, or Docker host) with environment variables configured.
+4. **Cloudflare Edge**: Route custom domain via Cloudflare with Full (Strict) SSL, edge CDN caching, and HSTS enforcement per [`docs/CLOUDFLARE.md`](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md).
