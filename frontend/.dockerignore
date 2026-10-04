@@ -1,6 +1,7 @@
 # Git
 .git
 .gitignore
+.kilo/
 
 # Dependencies & Build artifacts
 node_modules

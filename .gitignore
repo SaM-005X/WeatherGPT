@@ -26,4 +26,5 @@ backend/node_modules/
 credentials/
 *.zip
 *.tsbuildinfo
+.kilo/
 

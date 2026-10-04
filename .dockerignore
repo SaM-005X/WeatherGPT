@@ -4,7 +4,7 @@
 
 # Repository folders not needed for frontend build
 .aws-sam
-.kilo
+.kilo/
 backend
 docs
 supabase
