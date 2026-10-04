@@ -67,10 +67,10 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 [Stage 9] Geohazards Architecture — Earthquakes, Volcanoes & Tsunamis (COMPLETED)
     │
     ▼
-[Phase 10] Docker Containerization (Dockerfile & Image Verification — PENDING / NEXT)
+[Phase 10] Docker Containerization (COMPLETED)
     │
     ▼
-[Phase 11] Cloudflare Edge & HTTPS (Simple DNS, Full Strict SSL, Asset CDN — PENDING)
+[Phase 11] Cloudflare Edge & HTTPS (Simple DNS, Full Strict SSL, Asset CDN — PENDING / NEXT)
     │
     ▼
 [Phase 12] Testing & Final Verification (PENDING)
@@ -558,9 +558,26 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 ---
 
 ### Phase 10: Docker Containerization
-- **Status**: **Pending (Strictly Deferred to Phase 10)**
+- **Status**: **Completed**
 - **Goal**: Create and verify production multi-stage `Dockerfile.frontend` generating a standalone Next.js container image.
-- **Scope Boundary**: Containerization is an **infrastructure milestone**. Product features (e.g. activities, hazards, alerts) must NOT be merged into Phase 10.
+- **Completed Deliverables**:
+  - **Next.js Standalone Configuration**:
+    - Configured `output: 'standalone'` in `frontend/next.config.ts`.
+    - Preserved Turbopack compilation rules and TypeScript path aliases.
+  - **Docker Ignore Optimization**:
+    - Created `frontend/.dockerignore` and root `.dockerignore` excluding `.git`, `node_modules`, `.next`, `out`, `.env*.local`, test artifacts, and IDE configurations.
+  - **Multi-Stage Production Container (`frontend/Dockerfile.frontend`)**:
+    - Stage 1 (`deps`): Ingests frozen lockfile on `node:20-alpine`, installs dependencies with `libc6-compat`.
+    - Stage 2 (`builder`): Ingests source, exposes public `NEXT_PUBLIC_*` build arguments, and builds standalone application.
+    - Stage 3 (`runner`): Creates non-root system user/group `nodejs:nextjs` (UID/GID 1001). Copies standalone output, static assets, and public directory. Binds to `0.0.0.0:3000` via `node server.js`.
+  - **Local Smoke Testing & Verification**:
+    - Built image `weathergpt-frontend:latest` (~65MB compressed Alpine footprint).
+    - Executed container smoke test with port mapping.
+    - Verified HTTP 200 responses across all 18 routes and static chunk assets (`/_next/static/chunks/...`).
+    - Verified clean startup logs with 0 errors and startup latency < 1ms.
+  - **Host Tooling & Test Suite Parity**:
+    - Preserved host commands (`npm run dev`, `npm test`, `npm run build`).
+    - Confirmed 0 ESLint errors/warnings, 100% pass across all 17 test suites, and clean host build.
 
 ---
 

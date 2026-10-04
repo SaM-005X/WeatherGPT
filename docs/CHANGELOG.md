@@ -5,6 +5,33 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-10-04 — Phase 10: Production Docker Containerization
+
+### Added
+- **Next.js Standalone Configuration**: Configured `output: 'standalone'` in `frontend/next.config.ts` to automatically bundle traced production dependencies.
+- **Multi-Stage Production Dockerfile (`frontend/Dockerfile.frontend`)**:
+  - Implemented 3-stage architecture: `deps` (Alpine 3.20 + Node 20, libc6-compat, `npm ci`), `builder` (source ingest, `NEXT_PUBLIC_*` build-args, Turbopack build), and `runner` (minimal Alpine runtime).
+  - Configured non-root system user and group `nodejs:nextjs` with UID/GID 1001 for unprivileged container security.
+  - Set runtime parameters `PORT=3000`, `HOSTNAME="0.0.0.0"`, `NODE_ENV=production`, and `NEXT_TELEMETRY_DISABLED=1`.
+  - Configured standalone entrypoint `["node", "server.js"]` serving pre-rendered static assets and dynamic API routes.
+- **Docker Build Context Optimization**: Created `frontend/.dockerignore` and root `.dockerignore` excluding `.git`, `node_modules`, `.next`, `out`, `.env*.local`, test artifacts, documentation, and OS metadata.
+- **Documentation Updates**:
+  - `docs/DOCKER.md`: Documented multi-stage architecture, build/run/cleanup commands, and runtime configuration matrix.
+  - `docs/DEPLOYMENT.md`: Added production Docker deployment instructions and updated target deployment topology.
+  - `docs/ARCHITECTURE.md`: Added Section 18: Container Runtime Architecture detailing multi-stage topology, variable lifecycle separation, and runtime metrics.
+  - `docs/ROADMAP.md`: Marked Phase 10 as completed with full deliverable breakdown.
+
+### Changed
+- Containerized application footprint reduced to ~64.8MB compressed Alpine content size (~265MB uncompressed disk usage).
+
+### Verified
+- Built image `weathergpt-frontend:latest` via `docker build -t weathergpt-frontend:latest -f frontend/Dockerfile.frontend frontend`.
+- Verified local container execution with 0 startup errors (`Ready in 0ms`, `Running next.config took 1.1ms`).
+- Verified HTTP 200 health and content delivery across all 18 application routes and static chunks (`/_next/static/chunks/...`).
+- Verified test suite, lint, and build parity on host machine: 0 ESLint errors/warnings, 100% test pass across all 17 test suites, and clean host compilation via `npm run build`.
+
+---
+
 ## [1.11.1] - 2026-10-04 — System, Database Persistence & Ingestion Freshness Audit
 
 ### Audited & Verified

@@ -1,0 +1,77 @@
+# ==============================================================================
+# WeatherGPT — Production Multi-Stage Dockerfile (Next.js Standalone)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Stage 1: Dependency Resolution (deps)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Install dependencies strictly with frozen lockfile
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# ------------------------------------------------------------------------------
+# Stage 2: Application Builder (builder)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Copy cached dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Build-time environment variables
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# Public build-time arguments (injected into client bundles)
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_GRAPHQL_ENDPOINT
+ARG NEXT_PUBLIC_MAP_DEFAULT_LAT
+ARG NEXT_PUBLIC_MAP_DEFAULT_LON
+
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_GRAPHQL_ENDPOINT=$NEXT_PUBLIC_GRAPHQL_ENDPOINT
+ENV NEXT_PUBLIC_MAP_DEFAULT_LAT=$NEXT_PUBLIC_MAP_DEFAULT_LAT
+ENV NEXT_PUBLIC_MAP_DEFAULT_LON=$NEXT_PUBLIC_MAP_DEFAULT_LON
+
+# Build standalone Next.js application
+RUN npm run build
+
+# ------------------------------------------------------------------------------
+# Stage 3: Minimal Production Runner (runner)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Non-root system user and group (nodejs:nextjs UID/GID 1001)
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy public static assets
+COPY --from=builder /app/public ./public
+
+# Set permissions for Next.js cache directory
+RUN mkdir .next && chown nextjs:nodejs .next
+
+# Copy standalone build artifacts and static assets
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Switch to unprivileged runtime user
+USER nextjs
+
+EXPOSE 3000
+
+# Start Next.js standalone server
+CMD ["node", "server.js"]
