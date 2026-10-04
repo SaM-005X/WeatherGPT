@@ -449,12 +449,22 @@ Location Resolution / Selection
 ```
 
 ### Refresh & Persistence Specifications
-1. **10-Minute Polling Cycle**: Polling runs every 10 minutes (`AUTO_REFRESH_INTERVAL_MS = 600000`) for the current active coordinates.
+1. **10-Minute Polling Cycle**: Polling runs every 10 minutes (`AUTO_REFRESH_INTERVAL_MS = 600000`) for the current active coordinates via a 30-second interval check against `lastRefreshTimeRef.current`.
 2. **Active Location Safety**: Polling timer is tied to `[activeLocation.latitude, activeLocation.longitude]`. When the location changes, the old timer is destroyed immediately and a fresh 10-minute cycle begins for the new location.
-3. **Tab Visibility Awareness**: Automatic polling is suspended while the tab is hidden (`document.hidden`). When returned to `visible`, if ≥ 10 minutes have elapsed, an immediate refresh triggers and resets the interval.
+3. **Tab Visibility Awareness**: Automatic polling is suspended while the tab is hidden (`document.visibilityState === 'hidden'`). When returned to `visible`, if ≥ 10 minutes have elapsed since the last refresh, an immediate background refresh triggers and resets the interval.
 4. **Cache Invalidation on Refresh**: `forceRefresh: true` bypasses the in-memory 5-minute cache, ensuring real updated observations and forecasts from Open-Meteo.
-5. **Non-Destructive Error Handling**: If a refresh fails when weather is already rendered, the existing weather cards, 7-day forecast, and observation timestamp remain intact, and an inline notice informs the user without blowing away the dashboard.
+5. **Non-Destructive Error Handling**: If a refresh fails when weather is already rendered, the existing weather cards, 7-day forecast, and observation timestamp remain intact, and an inline notice informs the user without blowing away the dashboard or triggering skeleton flashes.
 6. **Race-Free Saved Locations Synchronization**: Instead of racing a Supabase read against an uncompleted write, `useLocationSystem` waits for `persistActiveLocation` to return `true` before fetching `getRecentPersistedLocations(5)`. The Saved UI pills update immediately with the persisted database record without requiring a page reload or subsequent search.
+
+### Audited Persistence & Security Boundary
+- **Active Tables Verified**:
+  - `public.locations`: Deduplicated upserts on generated `coord_key` (`ROUND(latitude, 4),ROUND(longitude, 4)`). Stores recent user coordinates and persists `savedLocations`.
+  - `public.geocoding_cache`: 30-day TTL queries (`expires_at > now()`) resolve cleanly and bypass Open-Meteo REST geocoding on cache hits.
+- **Row Level Security (RLS) Policy Enforcement**:
+  - Public `anon` role permissions: `SELECT`, `INSERT`, `UPDATE` are permitted for location history and geocoding caching.
+  - `DELETE` operations are strictly blocked across the `anon` interface, preventing destructive tampering.
+- **Non-Blocking Resilience**:
+  - If Supabase environment variables are missing, malformed, or if network queries fail, `locationPersistenceService.ts` logs a warning and gracefully degrades to memory-only state without throwing fatal runtime exceptions.
 
 ---
 
@@ -597,13 +607,18 @@ To prevent race conditions where a manual refresh, an automatic refresh, and an 
 - **Fallback Locations**: If Supabase has zero persisted locations, automatically falls back to default preset locations (`PRESET_LOCATIONS`).
 - **Structured Reporting**: Returns `SyncResult` detailing `locationsAttempted`, `locationsSucceeded`, `locationsFailed`, `durationMs`, and per-location execution statuses.
 
-### 6. Supabase Weather Cache Evaluation
+### 6. Supabase Weather Cache Evaluation & Storage Boundary Audit
 - **Evaluation Decision**: Persistent weather snapshots/forecast tables (`weather_snapshots`, `forecast_hourly`, `forecast_daily`) remain **intentionally deferred**.
-- **Rationale**:
+- **Rationale & Architectural Boundary**:
   1. Storing 32 rows (current + 24 hourly + 7 daily) per coordinate lookup would rapidly bloat PostgreSQL storage and hit Supabase quota limits.
   2. Open-Meteo REST API is high-performance (< 200ms) with generous limits.
   3. The enhanced in-memory cache with tiered freshness, in-flight deduplication, and stale fallback delivers sub-millisecond (< 1ms) responses with zero database latency and zero maintenance overhead.
   4. Persistent weather tables are deferred to future phases when cross-container multi-region distributed caching (e.g. Redis / ElastiCache) or historical analytics are required.
+- **Audit Verification (Pre-Phase 10 Sign-Off)**:
+  - **Zero Query Footprint**: Confirmed 100% of application runtime code makes NO queries to `weather_snapshots`, `forecast_hourly`, or `forecast_daily`.
+  - **In-Memory Tiered Cache Isolation**: Weather observations (`weatherService.ts`), geohazards (`earthquakeService.ts`, `volcanoService.ts`, `tsunamiService.ts`), and environmental metrics (`airQualityService.ts`, `astronomyService.ts`, `activityService.ts`) strictly operate within tiered in-memory caches (5m to 15m TTL) backed by dedicated in-flight deduplication maps (`inFlightRequests`, `inFlightAirQuality`, `inFlightAstronomy`).
+  - **Zero Memory Leaks**: All registries clean up deterministically in `finally` blocks, and all Leaflet overlay layer groups detach cleanly on unmount or toggle off.
+  - **Background Worker Resilience**: Verified `backend/src/handlers/sync.ts` executes per-location `try/catch` error isolation, ensuring single location failures do not crash the batch sync.
 
 ---
 

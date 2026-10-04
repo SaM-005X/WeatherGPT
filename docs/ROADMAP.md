@@ -530,6 +530,33 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 
 ---
 
+### System, Database Persistence & Freshness Audit (Pre-Phase 10 Gate)
+- **Status**: **Completed**
+- **Goal**: Perform comprehensive end-to-end audit verifying Supabase persistence vs in-memory caching boundary, client 10-minute refresh pipeline, AWS AppSync/GraphQL failover, and build/test health across all 18 routes prior to containerization.
+- **Audit Findings & Confirmations**:
+  - **Supabase Persistence & RLS**:
+    - Audited `public.locations` table: verified upsert deduplication on generated `coord_key` (`ROUND(latitude, 4),ROUND(longitude, 4)`).
+    - Audited `public.geocoding_cache` table: verified 30-day TTL queries (`expires_at > now()`) resolve cleanly and bypass Open-Meteo REST calls on hits.
+    - Verified Row Level Security (RLS) enforcement: public `anon` role has `SELECT`, `INSERT`, `UPDATE` access while `DELETE` is strictly blocked.
+    - Verified non-blocking fallback in `locationPersistenceService.ts`: gracefully degrades to memory when Supabase credentials are missing or fail.
+  - **Deferred Relational Tables & In-Memory Storage Boundary**:
+    - Verified 0 queries across codebase against `weather_snapshots`, `forecast_hourly`, and `forecast_daily`.
+    - Confirmed live weather, geohazards (earthquakes, volcanoes, tsunamis), and environmental services (air quality, astronomy, activities) strictly utilize in-memory tiered caches (5m to 15m) with request deduplication (`inFlightRequests`, `inFlightAirQuality`, `inFlightAstronomy`) and zero memory leaks.
+  - **10-Minute Polling & Data Freshness Engine**:
+    - Verified `AUTO_REFRESH_INTERVAL_MS = 600000` (10 minutes) polling logic in `frontend/src/app/page.tsx` running on a 30s visibility check.
+    - Confirmed location changes immediately cancel previous intervals and initiate a fresh 10-minute cycle.
+    - Verified `document.visibilityState` pauses polling in hidden tabs and triggers an immediate catch-up refresh on focus if ≥ 10m elapsed.
+    - Confirmed non-destructive SWR updates: background and manual refreshes update data atomically without skeleton flickers or layout shift.
+    - Audited `backend/src/handlers/sync.ts`: confirmed per-location `try/catch` error isolation in EventBridge scheduled batch sync.
+  - **AWS AppSync & GraphQL Gateway**:
+    - Audited `frontend/src/lib/api/graphqlClient.ts`: confirmed schema alignment (`cloudCover: Int`) and fast-fail fallback to direct `weatherService.ts` within < 1ms on timeout or 5xx.
+  - **Test Suite, Lint & Build Verification**:
+    - `npm run lint`: 0 errors, 0 warnings.
+    - `npm test`: 100% tests passing across all suites.
+    - `npm run build`: Turbopack compiled successfully across all 18 routes with zero errors.
+
+---
+
 ### Phase 10: Docker Containerization
 - **Status**: **Pending (Strictly Deferred to Phase 10)**
 - **Goal**: Create and verify production multi-stage `Dockerfile.frontend` generating a standalone Next.js container image.

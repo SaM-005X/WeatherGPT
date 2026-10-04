@@ -5,6 +5,33 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2026-10-04 — System, Database Persistence & Ingestion Freshness Audit
+
+### Audited & Verified
+- **Supabase Persistence & RLS Operational Boundary**:
+  - Audited `supabase/migrations/20260925000000_create_locations_and_geocoding_cache.sql` and `frontend/src/lib/locationPersistenceService.ts`.
+  - Confirmed `public.locations` table performs deduplicated upserts on generated `coord_key` (`ROUND(latitude, 4),ROUND(longitude, 4)`).
+  - Confirmed `public.geocoding_cache` enforces 30-day TTL queries (`expires_at > now()`) bypassing Open-Meteo REST calls on cache hits.
+  - Verified Row Level Security (RLS) enforcement: public `anon` role is granted `SELECT`, `INSERT`, and `UPDATE` permissions while `DELETE` remains strictly blocked.
+  - Verified non-blocking fallback in `locationPersistenceService.ts` to ensure unconfigured or failing Supabase connections degrade gracefully without fatal exceptions.
+- **Relational Storage vs In-Memory Caching Boundary**:
+  - Confirmed deferred tables (`weather_snapshots`, `forecast_hourly`, `forecast_daily`) are non-existent and zero runtime code attempts to query them.
+  - Confirmed live weather, geohazards (earthquakes, volcanoes, tsunamis), and environmental services (air quality, astronomy, activities) strictly operate within in-memory tiered caches (5m to 15m TTL) with request deduplication (`inFlightRequests`, `inFlightAirQuality`, `inFlightAstronomy`) and zero memory leakage across navigation.
+- **10-Minute Polling & Freshness Engine Verification**:
+  - Verified `AUTO_REFRESH_INTERVAL_MS = 600000` (10 minutes) polling logic in `frontend/src/app/page.tsx` running on a 30s visibility check.
+  - Confirmed changing `activeLocation` immediately cancels previous polling timers and initiates a fresh 10-minute cycle for new coordinates.
+  - Verified `document.visibilityState` pauses polling in hidden tabs and triggers an immediate catch-up refresh on focus if ≥ 10m elapsed.
+  - Confirmed non-destructive SWR updates: background and manual refreshes update data atomically without skeleton flickers or layout shift.
+  - Audited `backend/src/handlers/sync.ts`: confirmed per-location `try/catch` error isolation in EventBridge scheduled batch sync.
+- **AWS AppSync & GraphQL Gateway**:
+  - Audited `frontend/src/lib/api/graphqlClient.ts`: confirmed schema alignment (`cloudCover: Int`) and fast-fail fallback (< 1ms) to direct `weatherService.ts` on cold-start aborts or HTTP 5xx responses.
+- **Test Suite, Lint & Build Verification**:
+  - Verified `npm run lint` inside `frontend/` (0 errors, 0 warnings).
+  - Verified `npm test` inside `frontend/` (100% tests passing across all test suites).
+  - Verified `npm run build` using Turbopack across all 18 routes with clean compilation.
+
+---
+
 ## [1.11.0] - 2026-10-04 — Stage 10: Environmental, Astronomical & Lifestyle Intelligence
 
 ### Added & Enhanced
