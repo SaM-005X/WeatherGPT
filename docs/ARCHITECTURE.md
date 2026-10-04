@@ -948,4 +948,73 @@ Stage 8 introduces full-spectrum severe weather advisory detection, convective t
   - Volcanoes: Emoji DivIcon markers surrounded by an Aviation Color Code border ring.
 - **Clean Teardown**: Explicit `clearLayers()` on layer toggle off and component unmount, strictly preserving existing map layers (Radar, Wind, Clouds, Satellite, Storms).
 
+---
+
+## 17. Environmental, Astronomical & Lifestyle Intelligence Architecture (Stage 10)
+
+```text
+                                  [ User Location / Coordinates ]
+                                                 │
+      ┌──────────────────────────────────────────┼──────────────────────────────────────────┐
+      ▼                                          ▼                                          ▼
+[ Air Quality Service ]                 [ Astronomy Service ]                     [ Activity Engine ]
+(airQualityService.ts)                  (astronomyService.ts)                     (activityService.ts)
+  │ Open-Meteo Air Quality REST           │ Open-Meteo Forecast Ephemeris           │ 5 Outdoor Lifestyle Sports
+  │ US AQI (0-500) & European AQI         │ Sunrise, Sunset, Daylight Duration      │ Multi-Variable Comfort Scoring (0-100)
+  │ PM2.5, PM10, CO, NO2, SO2, O3         │ Real-time Solar Arc Progress %          │ Poor, Fair, Good, Ideal Tiers
+  │ EPA 5-Tier Health Advisories          │ Synodic Lunar Math (29.53d Epoch)       │ Positive & Negative Drivers
+  │ 5-Minute Cache & Deduplication        │ 15-Minute Cache & Deduplication         │ 5-Minute Cache & Deduplication
+      │                                          │                                          │
+      ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+      ▼                                          ▼                                          ▼
+[ /air-quality Page ]                   [ /astronomy Page ]                       [ /activities Page ]
+- US AQI Gauge & Category Badge         - Real-Time Solar Arc Progress Bar        - Hero: Top Recommended Sport
+- EPA Health Advisories Accordion       - Sunrise, Sunset & Golden Hours          - 5 Activity Cards with Drivers
+- 6-Pollutant Concentration Grid        - Synodic Lunar Phase & Illumination %    - Live Microclimate Strip
+- Dominant Pollutant Identifier         - Moon Age & Next Full/New Moon Days      - Filter Tabs (All, Top, Day, Night)
+```
+
+### 1. Air Quality & Environmental Health Service (`src/lib/airQualityService.ts`)
+- **Data Ingestion**: Queries the Open-Meteo Air Quality endpoint (`https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=european_aqi,us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone`).
+- **Normalized Pollutants**: Extracts and categorizes PM2.5, PM10, Carbon Monoxide (CO), Nitrogen Dioxide (NO₂), Sulphur Dioxide (SO₂), and Ozone (O₃) in standard units (`µg/m³`).
+- **EPA / US AQI Categorization**:
+  - `Good`: 0–50 (satisfactory air quality, zero health risk)
+  - `Moderate`: 51–100 (acceptable air quality, minor sensitivity for select individuals)
+  - `Sensitive`: 101–150 (unhealthy for sensitive groups like asthma, elderly, children)
+  - `Unhealthy`: 151–200 (everyone may experience noticeable health effects)
+  - `Hazardous`: 201+ (emergency health warnings; population-wide exposure hazard)
+- **Health Advisories Engine**: Generates targeted directives for the general public, sensitive/at-risk individuals, and outdoor recreational exercise.
+- **Dominant Pollutant Detection**: Analyzes relative severity between particulates and photochemical gases to highlight the primary air quality driver.
+- **Caching & Resilience**: 5-minute in-memory cache (`AIR_QUALITY_CACHE_TTL_MS = 300_000`) and in-flight request deduplication via `inFlightAirQuality` Map.
+
+### 2. Sun & Moon Astronomy Ephemeris Service (`src/lib/astronomyService.ts`)
+- **Solar Ephemeris Ingestion**: Queries Open-Meteo Forecast endpoint (`daily=sunrise,sunset,daylight_duration&timezone=auto`) to extract precise daily dawn, dusk, and total sunlight seconds.
+- **Real-Time Solar Arc Tracking**:
+  - Computes client-relative solar trajectory progress percentage (`(now - sunrise) / (sunset - sunrise) * 100`).
+  - Identifies celestial solar status (`Pre-Dawn`, `Daylight`, `Post-Dusk`) and solar noon zenith midpoint.
+  - Calculates photography Golden Hours (morning hour post-sunrise, evening hour pre-sunset).
+- **Synodic Month Lunar Calculations**:
+  - Employs exact synodic month period (`29.53058867` days) referenced to the epoch of Jan 6, 2000, 18:14 UTC.
+  - Derives exact Moon phase names: `New Moon`, `Waxing Crescent`, `First Quarter`, `Waxing Gibbous`, `Full Moon`, `Waning Gibbous`, `Last Quarter`, `Waning Crescent`.
+  - Computes geometric Moon illumination percentage (`(1 - cos(phaseFraction * 2π)) / 2 * 100`).
+  - Estimates countdown days until the next Full Moon and New Moon.
+- **Caching & Deduplication**: 15-minute memory cache (`ASTRONOMY_CACHE_TTL_MS = 900_000`) with in-flight deduplication.
+
+### 3. Weather Activity Suitability Engine (`src/lib/activityService.ts`)
+- **Multi-Variable Comfort Scoring**:
+  - Evaluates 5 outdoor activities across ambient temperature, precipitation rate, wind gusts, cloud cover, relative humidity, and solar daylight status.
+  - **Running & Jogging**: Ideal at 12–20°C, zero rain, light wind (<15 km/h). Penalizes heat stress (>25°C, high humidity), freezing pavement, and downpours.
+  - **Cycling**: Ideal at 15–25°C, dry asphalt, wind < 20 km/h. Strongly penalizes gusty crosswinds (>25 km/h, gale >40 km/h) and wet surface braking risks.
+  - **Hiking & Walking**: Ideal at 14–23°C, daylight, dry footing. Penalizes night-time trail hazards, heavy precipitation, and ridge gales.
+  - **Beach & Swimming**: Ideal at 25–34°C, clear skies (<25% clouds), light breeze. Heavily penalizes cool temperatures (<22°C), rain, and night hours.
+  - **Stargazing & Astronomy**: Ideal at night only (`isDaylight = false`), cloud cover < 20%, low humidity, calm winds. Automatically drops to 0 score in daylight.
+- **Standardized Rating Tiers**:
+  - `Ideal`: 80–100
+  - `Good`: 60–79
+  - `Fair`: 40–59
+  - `Poor`: 0–39
+- **Driver Itemization**: Generates specific positive (e.g. "Optimal running temperature", "Pristine dark skies") and negative warnings (e.g. "Gale gusts challenge bike handling", "Daylight prevents celestial viewing").
+- **Caching & In-Flight Concurrency**: 5-minute memory cache (`ACTIVITY_CACHE_TTL_MS = 300_000`) with in-flight request deduplication and synchronous pure evaluation support (`customMetrics`).
+
+
 

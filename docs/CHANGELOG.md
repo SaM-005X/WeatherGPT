@@ -5,6 +5,35 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-10-04 — Stage 10: Environmental, Astronomical & Lifestyle Intelligence
+
+### Added & Enhanced
+- **Air Quality & Environmental Health Service (`frontend/src/lib/airQualityService.ts` & `/air-quality` Page)**:
+  - Created `airQualityService.ts` querying Open-Meteo Air Quality REST endpoint (`https://air-quality-api.open-meteo.com/v1/air-quality`).
+  - Extracted and normalized US AQI (0–500), European AQI (0–100+), particulate matter (PM2.5, PM10), and trace pollutants (CO, NO₂, SO₂, O₃) in standard `µg/m³` concentration units.
+  - Implemented EPA 5-tier classification (`Good`, `Moderate`, `Sensitive`, `Unhealthy`, `Hazardous`) with actionable general public, sensitive group, and outdoor recreation health advisories.
+  - Built live `/air-quality` route (`frontend/src/app/air-quality/page.tsx`) featuring dominant pollutant banner, interactive US AQI gauge, EPA health advisories, and 6-pollutant continuous monitoring grid.
+  - Implemented 5-minute memory TTL cache with in-flight request deduplication (`inFlightAirQuality`).
+- **Sun & Moon Astronomy Ephemeris Service (`frontend/src/lib/astronomyService.ts` & `/astronomy` Page)**:
+  - Created `astronomyService.ts` querying Open-Meteo Forecast daily ephemeris (`sunrise`, `sunset`, `daylight_duration`).
+  - Computed client-synchronized solar arc progress percentage (`Pre-Dawn`, `Daylight`, `Post-Dusk`), solar noon zenith, and morning/evening photography Golden Hours.
+  - Implemented synodic month lunar cycle mathematics (`29.53058867` days period relative to epoch Jan 6, 2000, 18:14 UTC).
+  - Calculated exact Moon illumination percentage (`0–100%`) and 8 distinct Moon phases (`New Moon`, `Waxing Crescent`, `First Quarter`, `Waxing Gibbous`, `Full Moon`, `Waning Gibbous`, `Last Quarter`, `Waning Crescent`).
+  - Built live `/astronomy` route (`frontend/src/app/astronomy/page.tsx`) featuring interactive solar arc progress bar, golden hour countdowns, and lunar phase visual card.
+  - Implemented 15-minute memory TTL cache with in-flight deduplication (`inFlightAstronomy`).
+- **Weather Activity Suitability Engine (`frontend/src/lib/activityService.ts` & `/activities` Page)**:
+  - Created `activityService.ts` evaluating 5 outdoor activities (Running & Jogging, Cycling, Hiking & Walking, Beach & Swimming, Stargazing) with multi-variable comfort scoring (0–100).
+  - Derived ratings against local temperature, precipitation intensity, wind gusts, cloud cover, relative humidity, and solar daylight status.
+  - Standardized rating tiers: `Poor` (<40), `Fair` (40–59), `Good` (60–79), and `Ideal` (80–100) with itemized positive and negative driver explanations.
+  - Added daylight lock guardrail for stargazing (score forced to 0 during daylight).
+  - Built live `/activities` route (`frontend/src/app/activities/page.tsx`) with Top Pick Hero card, microclimate parameters strip, and category filters (All, Recommended, Daytime, Night).
+  - Implemented 5-minute memory TTL cache with in-flight deduplication and pure evaluation mode (`customMetrics`).
+- **Testing & Quality Assurance**:
+  - Created automated test suite `frontend/src/tests/environmentActivities.test.ts` (4/4 test phases passed).
+  - Registered `test:env` script in `frontend/package.json` and integrated into standard `npm test`.
+
+---
+
 ## [1.10.0] - 2026-10-04 — Stage 9: Geohazards Architecture (Earthquakes, Volcanoes & Tsunamis)
 
 ### Added & Enhanced

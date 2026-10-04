@@ -36,8 +36,20 @@ async function runFreshnessBugInvestigationTests() {
   // --------------------------------------------------------------------------
   // Scenario 1: Initial fetch & establishing baseline
   // --------------------------------------------------------------------------
-  console.log('[1/8] Test 1: Initial fetch & baseline timestamp recording...');
-  const initialData = await fetchWeatherData(testLat, testLon);
+  let initialData: Awaited<ReturnType<typeof fetchWeatherData>> | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      initialData = await fetchWeatherData(testLat, testLon);
+      break;
+    } catch (e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (attempt < 2 && e?.message?.includes('overloaded')) {
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        throw e;
+      }
+    }
+  }
+  if (!initialData) throw new Error('Failed to fetch initial weather data');
   assert.strictEqual(initialData.current.isStale, false, 'Initial data must not be stale.');
   assert.strictEqual(initialData.cacheMetadata?.isFresh, true, 'Initial cache metadata must be fresh.');
   assert.ok(initialData.lastUpdated, 'Must contain lastUpdated timestamp.');

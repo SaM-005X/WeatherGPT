@@ -499,6 +499,37 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 
 ---
 
+### Stage 10: Environmental, Astronomical & Lifestyle Intelligence
+- **Status**: **Completed**
+- **Goal**: Implement live environmental air pollution tracking, solar/lunar astronomical ephemeris, and multi-variable outdoor lifestyle comfort scoring.
+- **Completed Deliverables**:
+  - **Air Quality & Environmental Health Service (`airQualityService.ts` & `/air-quality` Page)**:
+    - Queried Open-Meteo Air Quality REST API (`https://air-quality-api.open-meteo.com/v1/air-quality`).
+    - Normalized US AQI, European AQI, PM2.5, PM10, Carbon Monoxide, Nitrogen Dioxide, Sulphur Dioxide, and Ozone in standard units (`µg/m³`).
+    - Standardized EPA AQI 5-tier classification (`Good`, `Moderate`, `Sensitive`, `Unhealthy`, `Hazardous`) with actionable civilian and sensitive-group health advisories.
+    - Dominant pollutant identifier and EPA spectrum gauge.
+    - 5-minute memory TTL cache with in-flight request deduplication.
+    - Responsive `/air-quality` dashboard with live observation grid and location synchronization.
+  - **Sun & Moon Astronomy Service (`astronomyService.ts` & `/astronomy` Page)**:
+    - Queried Open-Meteo Forecast daily ephemeris (`sunrise`, `sunset`, `daylight_duration`).
+    - Real-time client solar arc progress tracking (`Pre-Dawn`, `Daylight`, `Post-Dusk`) with solar noon and golden hour intervals.
+    - Synodic month lunar cycle calculations (`29.53058867` days period referenced to Jan 6, 2000 epoch).
+    - Geometric Moon illumination percentage math and 8 distinct Moon phase classifications (`New Moon`, `Waxing Crescent`, `First Quarter`, `Waxing Gibbous`, `Full Moon`, `Waning Gibbous`, `Last Quarter`, `Waning Crescent`).
+    - 15-minute memory TTL cache with in-flight request deduplication.
+    - Responsive `/astronomy` dashboard with solar arc progress bar, golden hour cards, and lunar phase visual card.
+  - **Weather Activity Suitability Engine (`activityService.ts` & `/activities` Page)**:
+    - Evaluated 5 outdoor activities (Running, Cycling, Hiking, Beach/Swimming, Stargazing) with multi-variable comfort scoring (0–100) based on temperature, rain rate, wind speed, cloud cover, humidity, and daylight status.
+    - Standardized rating tiers: `Poor` (<40), `Fair` (40–59), `Good` (60–79), and `Ideal` (80–100).
+    - Itemized positive and negative weather drivers for each activity.
+    - Stargazing daylight lockout guardrail (score forced to 0 during daylight).
+    - 5-minute memory TTL cache with in-flight deduplication and pure evaluation mode (`customMetrics`).
+    - Responsive `/activities` dashboard with Top Recommended Hero card, microclimate strip, and category filters.
+  - **Automated Test Suite**:
+    - Created comprehensive unit and integration test suite `src/tests/environmentActivities.test.ts` (4/4 test phases passed).
+    - Added `test:env` script and integrated into main `npm test`.
+
+---
+
 ### Phase 10: Docker Containerization
 - **Status**: **Pending (Strictly Deferred to Phase 10)**
 - **Goal**: Create and verify production multi-stage `Dockerfile.frontend` generating a standalone Next.js container image.
@@ -532,9 +563,9 @@ During **Step 1 (Navigation Shell & Global Location Context)**, the navigation h
 | **`/earthquakes`** | Global Earthquake Tracker | USGS GeoJSON Feed | **Fully Implemented** (Live quakes feed, filters, map layer) | **Core Feature (Completed Stage 9)** |
 | **`/volcanoes`** | Volcano Activity & Eruptions | Smithsonian GVP / USGS | **Fully Implemented** (Live volcanoes feed, aviation codes, map layer) | **Core Feature (Completed Stage 9)** |
 | **`/tsunamis`** | Tsunami Advisories | NOAA / PTWC Bulletin | **Fully Implemented** (Live advisories banner, ocean basins, safety rules) | **Core Feature (Completed Stage 9)** |
-| **`/activities`** | Weather Activities & Lifestyle | Multi-variable comfort rules | Static UI card with dummy sports; no scoring engine | **UI Placeholder / Future Feature** |
-| **`/air-quality`**| Air Quality & Environment | Open-Meteo Air Quality | Static UI card with dummy AQI scales; no fetcher | **UI Placeholder / Future Feature** |
-| **`/astronomy`** | Sun & Moon Astronomy | Open-Meteo / SunCalc | Static UI card with dummy sun/moon items; no fetcher | **UI Placeholder / Future Feature** |
+| **`/activities`** | Weather Activities & Lifestyle | Multi-variable comfort rules | **Fully Implemented** (Live 5-activity scoring engine, tiers, drivers, filters) | **Core Feature (Completed Stage 10)** |
+| **`/air-quality`**| Air Quality & Environment | Open-Meteo Air Quality | **Fully Implemented** (Live US AQI, 6 pollutants, EPA advisories, 5m cache) | **Core Feature (Completed Stage 10)** |
+| **`/astronomy`** | Sun & Moon Astronomy | Open-Meteo Ephemeris & Synodic | **Fully Implemented** (Live solar arc bar, golden hours, lunar phase math) | **Core Feature (Completed Stage 10)** |
 
 > **Notice on Legacy UI Badges**:
-> The current placeholder pages contain legacy "Phase 9/10/11/12 Roadmap" badges drafted during Step 1 UI prototyping. These labels do **not** represent the canonical implementation roadmap. The canonical roadmap reserves Phase 9 for the Weather Chatbot and Phases 10–12 for infrastructure, containerization, edge deployment, and release verification. These conflicting UI badges will be reconciled in a separate UI cleanup step.
+> The earlier placeholder routes have now all been converted to fully operational live domain services and responsive dashboards. All navigation links in `TopNav.tsx` now connect to active, tested production views.
