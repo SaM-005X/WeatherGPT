@@ -995,7 +995,7 @@ export default function WeatherMapInternal({
             title="Toggle Live USGS Earthquakes Layer"
             aria-pressed={isEarthquakeActive}
           >
-            <span>🌋</span>
+            <span>📉</span>
             <span>Earthquakes</span>
             {isEarthquakeActive && <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />}
           </button>

@@ -70,7 +70,7 @@ export default function EarthquakesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">🌋</span>
+            <span className="text-xl">📉</span>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">USGS Live Earthquake Tracker</h1>
             <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 uppercase">
               Live Feed
