@@ -192,6 +192,15 @@ ON public.forecast_daily(location_id, forecast_date ASC);
 ```
 
 ### Architectural Rationale for Deferral:
-1. **Performance**: The in-memory tiered cache in `weatherService.ts` provides sub-millisecond (< 1ms) responses without PostgreSQL round-trip latency.
+1. **Performance**: The in-memory tiered cache in `weatherService.ts` provides rapid sub-millisecond in-memory cache hits without PostgreSQL network round-trip latency.
 2. **Quota Hygiene**: Storing 32 rows (1 current + 24 hourly + 7 daily) per coordinate lookup would rapidly consume database storage quotas.
 3. **Provider Efficiency**: Open-Meteo's API is fast (< 200ms) and keyless. Storing persistent weather tables is deferred until multi-region distributed caching (e.g. Redis / ElastiCache) or historical analytics features are required.
+
+---
+
+## 5. Related Documentation
+
+- [Project Overview](PROJECT_OVERVIEW.md) — High-level architecture, module boundaries, and persistent data tiers.
+- [System Architecture](ARCHITECTURE.md) — Overall production data flow and client-to-Supabase integration.
+- [Deployment Guide](DEPLOYMENT.md) — Production environment variables and Supabase setup steps.
+- [Troubleshooting Runbook](TROUBLESHOOTING.md) — Resolving Supabase connectivity and RLS policy issues.

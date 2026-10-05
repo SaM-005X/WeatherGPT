@@ -1,5 +1,14 @@
 # WeatherGPT — Roadmap
 
+> **CURRENT FINAL STATE: v1.14.0 (PRODUCTION READY)**
+> - **Roadmap Progress**: Phases 0 through 12 are **100% COMPLETED**.
+> - **Frontend Packaging**: Multi-stage standalone Next.js container on `node:22-alpine` (port 3000).
+> - **Hosting & Edge**: Deployed to Render Web Service ([https://weathergpt-frontend.onrender.com](https://weathergpt-frontend.onrender.com)) with Cloudflare Edge proxy ([https://weathergpt.app](https://weathergpt.app)).
+> - **Production Backend**: AWS AppSync GraphQL API (`lae4htbgzfbcvjnczbgzio3w6q`) in `us-east-1` with direct Lambda resolver (`WeatherFunction`), EventBridge sync (`ForecastSyncFunction`), and < 2ms fallback.
+> - **Database**: Supabase PostgreSQL (`locations`, `geocoding_cache`) with Row Level Security.
+> - **AI Chatbot**: Groq Cloud running Qwen 3.8 27B via Next.js `/api/chat` with strict guardrails and deterministic meteorological fallback.
+> - **Verification Baseline**: 100% pass across all 18 test suites, 0 ESLint errors/warnings, clean Turbopack build across 18 routes.
+
 This roadmap defines the step-by-step implementation plan. Work proceeds sequentially, strictly phase-by-phase without premature execution of downstream phases.
 
 ---
@@ -344,7 +353,7 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
 ---
 
 ### Phase 8.5: AWS AppSync Integration
-- **Status**: **In Progress / Planned**
+- **Status**: **Completed**
 - **Goal**: Introduce AWS AppSync as the managed serverless GraphQL entry point for production while preserving GraphQL Yoga for local development and maintaining existing domain services (`weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`) as the single source of business logic.
 - **Detailed Sub-Step Sequence**:
   - **Phase 8.5.1 — Architecture & Repository Audit**: **Completed** (Systematic audit of existing frontend, backend, Supabase, and GraphQL implementations).
@@ -356,26 +365,26 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
   - **Phase 8.5.6 — Remaining Resolver Parity**: **Completed** (Preserved location services on client/direct Supabase; aligned AppSync schema with operational endpoints).
   - **Phase 8.5.7 — Real AWS Deployment & Cloud Verification**: **Completed** (Executed CloudFormation change set `samcli-deploy1790757616`, verified `CREATE_COMPLETE`, extracted AppSync endpoints, executed live test query returning HTTP 200 OK without errors).
   - **Phase 8.5.8 — Frontend GraphQL Adapter Wiring**: **Completed** (Created `src/lib/api/graphqlClient.ts`, updated `.env.local` & `.env.example`, wired dashboard `page.tsx` to `fetchWeatherByCoordinates`, verified loading states, error handling, live AppSync fetching, and 5/5 automated integration tests).
-  - **Phase 8.5.9 — Full Regression Verification**: **Next Step** (Run complete end-to-end regression test suite, verify live dashboard, radar map, saved locations, and automated refresh).
-  - **Phase 8.5.10 — Final Review & Git Checkpoint**: **Planned** (Perform comprehensive architecture review, update changelog, and establish a new confirmed Git checkpoint).
+  - **Phase 8.5.9 — Full Regression Verification**: **Completed** (Ran complete end-to-end regression test suite, verified live dashboard, radar map, saved locations, and automated refresh).
+  - **Phase 8.5.10 — Final Review & Git Checkpoint**: **Completed** (Performed comprehensive architecture review, updated changelog, and established confirmed Git checkpoint).
 - **Preserved Architectural Invariants**:
   - `weatherService.ts` remains the meteorological domain logic layer (in-memory cache, tiered freshness, deduplication, Open-Meteo REST calls).
   - `geocodingService.ts` and `locationPersistenceService.ts` remain the location domain logic layers.
   - Next.js Dashboard wired to `fetchWeatherByCoordinates` in Phase 8.5.8, targeting live AppSync in production with direct service fallback.
-  - Future features (Phase 9 Chatbot, Phase 10 Docker, Phase 11 Cloudflare, Phase 12 Verification, and placeholder domains like Air Quality, Astronomy, Severe Weather Alerts, Nowcast, Storms) remain fully preserved.
+  - Downstream features (Phase 9 Chatbot, Phase 10 Docker, Phase 11 Cloudflare, Phase 12 Verification, and domain expansions like Air Quality, Astronomy, Severe Weather Alerts, Nowcast, Storms) remain fully preserved.
 
 ---
 
-### Phase 9: Weather Chatbot with Google Gemini & Prompt Guardrail
+### Phase 9: Weather Chatbot with Groq Cloud (Qwen 3.8 27B) & Lifestyle Guardrails
 - **Status**: **Completed**
 - **Completed Deliverables**:
   - **Core Assistant Engine (`src/lib/weatherAssistant.ts`)**:
-    - Powered by Google Gemini (`gemini-2.5-flash` or `gemini-1.5-flash`) via the official `@google/genai` SDK without heavy vector databases or LangChain.
+    - Powered by Groq Cloud API running `qwen/qwen3.8-27b` via OpenAI-compatible chat completions (`https://api.groq.com/openai/v1/chat/completions`) without heavy vector databases or LangChain.
     - Generates system prompt with live meteorological context injection (`temperature`, `feelsLike`, `condition`, `humidity`, `windSpeed`, `precipitation`, `cloudCover`, forecasts).
-    - Enforces strict weather-only guardrails; automatically rejects off-topic queries (coding, trivia, recipes, history, math, creative writing) with standard polite refusal: `'I am your weather assistant and can only help with questions about the current weather, forecasts, and outdoor planning.'`.
-    - Deterministic meteorological grounding engine providing accurate clothing, umbrella, and outdoor activity recommendations when `GEMINI_API_KEY` is omitted or placeholder.
+    - Enforces strict weather-only guardrails; automatically rejects off-topic queries (coding, trivia, recipes, history, math, creative writing) with standard polite refusal.
+    - Deterministic meteorological grounding engine providing accurate clothing, umbrella, and outdoor activity recommendations when `GROQ_API_KEY` is omitted, placeholder, or rate-limited (HTTP 429).
   - **Next.js API Route (`src/app/api/chat/route.ts`)**:
-    - Dedicated Route Handler accepting `messages` (limited to last 4-6 turns max) and `weatherContext`.
+    - Dedicated Route Handler accepting `messages` (limited to last 3-4 turns max) and `weatherContext`.
     - Returns standardized `{ reply, isOffTopic, source }` JSON responses.
   - **Interactive Dashboard UI (`src/components/WeatherChat.tsx` / `src/components/chatbot/WeatherAssistant.tsx`)**:
     - Embedded into the main dashboard, dynamically grounded in `activeLocation` and live `weatherData`.
@@ -383,7 +392,8 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
     - Scrollable message history with auto-scroll to bottom, loading indicator dots, Enter-key submission, and guardrail badge highlighting.
   - **Comprehensive Verification Suite (`src/tests/weatherChatbot.test.ts`)**:
     - 5/5 automated tests validating prompt formatting, on-topic grounded queries, off-topic rejection, warm weather adaptation, and `/api/chat` Route Handler execution.
-    - Clean compilation with 0 TypeScript errors, 0 ESLint warnings, and successful Next.js production build (`next build` across 17 routes).
+    - Clean compilation with 0 TypeScript errors, 0 ESLint warnings, and successful Next.js production build (`next build`).
+
 
 ---
 
@@ -567,17 +577,17 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
   - **Docker Ignore Optimization**:
     - Created `frontend/.dockerignore` and root `.dockerignore` excluding `.git`, `node_modules`, `.next`, `out`, `.env*.local`, test artifacts, and IDE configurations.
   - **Multi-Stage Production Container (`frontend/Dockerfile.frontend`)**:
-    - Stage 1 (`deps`): Ingests frozen lockfile on `node:20-alpine`, installs dependencies with `libc6-compat`.
+    - Stage 1 (`deps`): Ingests frozen lockfile on `node:22-alpine`, installs dependencies with `libc6-compat`.
     - Stage 2 (`builder`): Ingests source, exposes public `NEXT_PUBLIC_*` build arguments, and builds standalone application.
     - Stage 3 (`runner`): Creates non-root system user/group `nodejs:nextjs` (UID/GID 1001). Copies standalone output, static assets, and public directory. Binds to `0.0.0.0:3000` via `node server.js`.
   - **Local Smoke Testing & Verification**:
     - Built image `weathergpt-frontend:latest` (~65MB compressed Alpine footprint).
     - Executed container smoke test with port mapping.
     - Verified HTTP 200 responses across all 18 routes and static chunk assets (`/_next/static/chunks/...`).
-    - Verified clean startup logs with 0 errors and startup latency < 1ms.
+    - Verified clean startup logs with 0 errors and startup latency < 1ms in local smoke tests.
   - **Host Tooling & Test Suite Parity**:
     - Preserved host commands (`npm run dev`, `npm test`, `npm run build`).
-    - Confirmed 0 ESLint errors/warnings, 100% pass across all 17 test suites, and clean host build.
+    - Confirmed 0 ESLint errors/warnings, 100% pass across all test suites, and clean host build.
 
 ---
 
@@ -588,11 +598,11 @@ This roadmap defines the step-by-step implementation plan. Work proceeds sequent
   - **Next.js Production Edge Headers (`frontend/next.config.ts`)**:
     - Configured HSTS (`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`).
     - Configured defense-in-depth headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`.
-    - Applied 1-year immutable caching (`public, max-age=31536000, immutable`) for `/_next/static/*` and static media assets, enabling Cloudflare edge caching (`HIT`).
+    - Applied 1-year immutable caching (`public, max-age=31536000, immutable`) for static media assets, enabling Cloudflare edge caching (`HIT`).
     - Added dynamic route protection (`Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache`) for `/api/*` to bypass edge cache.
-  - **Cloudflare Production Runbook (`docs/CLOUDFLARE.md`)**:
-    - Documented DNS configuration (`@` and `www` with Orange Cloud proxy enabled).
-    - Detailed Full (Strict) SSL mode architecture and Cloudflare Origin CA certificate installation.
+  - **Cloudflare & Render Production Topology (`docs/CLOUDFLARE.md`)**:
+    - Documented DNS configuration (`@` and `www` CNAME pointing to Render Web Service `weathergpt-frontend.onrender.com` with Orange Cloud proxy enabled).
+    - Detailed Full / Full (Strict) SSL mode architecture utilizing Render's automated managed origin TLS certificates.
     - Specified edge cache rules matrix (Static `HIT` vs Dynamic `DYNAMIC`).
     - Documented troubleshooting procedures for Cloudflare Errors 525, 520, 521, and 522, along with `curl` verification commands.
   - **Deployment & Architecture Documentation**:

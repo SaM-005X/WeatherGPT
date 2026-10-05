@@ -5,6 +5,26 @@ All notable changes to WeatherGPT are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] - 2026-10-05 — Documentation Canonicalization & Production Deployment Synchronization
+
+### Documentation Maintenance
+- **Comprehensive Documentation Audit & Canonicalization**:
+  - Audited all 12 project Markdown documentation files (`README.md`, `docs/PROJECT_OVERVIEW.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/GRAPHQL.md`, `docs/AWS.md`, `docs/SUPABASE.md`, `docs/DOCKER.md`, `docs/DEPLOYMENT.md`, `docs/CLOUDFLARE.md`, `docs/TROUBLESHOOTING.md`, `docs/CHANGELOG.md`).
+  - Reconciled documentation against verified live production infrastructure: Render Web Service Docker hosting (`https://weathergpt-frontend.onrender.com`), Cloudflare Edge (`https://weathergpt.app`), AWS AppSync (`us-east-1` API ID `lae4htbgzfbcvjnczbgzio3w6q`), Supabase PostgreSQL, and Groq Cloud Qwen 3.8 27B inference.
+- **Environment Variable Canonicalization**:
+  - Standardized the AppSync frontend GraphQL URL on the exact variable consumed by the application client: `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL` (paired with `NEXT_PUBLIC_APPSYNC_API_KEY`).
+  - Standardized the Weather Assistant LLM secret on `GROQ_API_KEY` (server-side only in `/api/chat`, never exposed in client bundles or Docker build args).
+- **Edge & Origin Alignment (`docs/CLOUDFLARE.md`, `docs/DEPLOYMENT.md`)**:
+  - Aligned Cloudflare documentation with the Render Web Service origin (CNAME routing, automated Render origin TLS certificate lifecycle, Full (Strict) SSL mode).
+  - Aligned caching documentation with Next.js 16 native immutable static chunk caching and eliminated obsolete custom `/_next/static/*` header references.
+- **Cross-Link Validation & Local Link Eradication**:
+  - Removed all local Windows filesystem links (`file:///c:/...`) and restored repository-relative Markdown links.
+  - Added clean, bidirectional "Related Documentation" navigation across technical architecture, deployment, and troubleshooting runbooks.
+- **Metric Qualification**:
+  - Accurately distinguished local smoke-test benchmarks (e.g. sub-millisecond in-memory cache lookups, container initialization times) from cloud production service expectations.
+
+---
+
 ## [1.14.0] - 2026-10-05 — Phase 12: Final Release Gate, Docker Runtime Alignment & Production Readiness Sign-Off
 
 ### Added

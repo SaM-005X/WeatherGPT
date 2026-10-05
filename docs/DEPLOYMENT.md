@@ -1,130 +1,203 @@
-# WeatherGPT — Deployment Guide
+# WeatherGPT — Production Deployment Guide
 
-## 1. Target Deployment Overview
+## 1. Production Architecture Overview
 
-> **ARCHITECTURAL STATUS NOTICE**:
-> This document specifies the **Target & Verified Live Production Deployment Architecture** for WeatherGPT v1.14.0.
-> - **Frontend Container Runtime**: **COMPLETED & ALIGNED (Node 22 LTS / Alpine 3.20)** via `frontend/Dockerfile.frontend`.
-> - **Cloudflare Edge & Production HTTPS**: **COMPLETED & CONFIGURED (Phase 11)** — Global Anycast DNS, Full (Strict) SSL, edge caching.
-> - **Render Web Service Hosting**: **VERIFIED LIVE CONTAINER TARGET** — Docker Web Service running standalone Next.js.
-> - **AWS AppSync Managed GraphQL**: **DEPLOYED & VERIFIED** in `us-east-1` (API ID `lae4htbgzfbcvjnczbgzio3w6q`) with seamless direct domain fallback (< 2ms).
-> - **Database (Supabase PostgreSQL)**: **ACTIVE & VERIFIED** with Row Level Security on `locations` and `geocoding_cache`.
+This document specifies the **Verified Live Production Deployment Architecture & Operational Runbook** for WeatherGPT v1.14.0.
 
-The production topology consists of:
-- **Cloudflare Edge (Phase 11)**: Global Anycast DNS management, Full (Strict) SSL/HTTPS termination, HSTS security headers, and 1-year immutable edge CDN static caching.
-- **Frontend Container Hosting (Phase 10 & 12)**: Next.js multi-stage standalone Docker container (`weathergpt-frontend:latest` on `node:22-alpine`) deployed to Render (`weathergpt-frontend.onrender.com`) and container runners (e.g. AWS App Runner, ECS/Fargate, or Docker host).
-- **Backend Hosting (AWS Lambda & AppSync)**: AWS Lambda behind AWS AppSync / API Gateway (HTTP API v2) with automatic fallback to direct meteorological services.
-- **Database (Supabase PostgreSQL)**: Managed PostgreSQL hosting `locations` and `geocoding_cache` tables with Row Level Security.
+> **CANONICAL PRODUCTION TOPOLOGY**:
+> - **Frontend Container Runtime**: Node 22 LTS / Alpine 3.20 (`node:22-alpine`) standalone Next.js container via `frontend/Dockerfile.frontend`.
+> - **Frontend Hosting**: **Render Web Service** (`https://weathergpt-frontend.onrender.com`) running the standalone Next.js container on port 3000.
+> - **Edge Network & DNS**: **Cloudflare Anycast Edge** (`https://weathergpt.app`) providing global DNS, Full (Strict) SSL termination, HSTS security headers, and static CDN caching.
+> - **Backend GraphQL**: **AWS AppSync** (`https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql`) in `us-east-1` (API ID `lae4htbgzfbcvjnczbgzio3w6q`) backed by `WeatherFunction` with automatic direct domain fallback.
+> - **Background Warming**: **AWS EventBridge** triggering `ForecastSyncFunction` every 30 minutes (`rate(30 minutes)`).
+> - **Database**: **Supabase PostgreSQL** hosting `public.locations` and `public.geocoding_cache` with Row Level Security.
+> - **Weather AI Chatbot**: **Groq Cloud API** (`qwen/qwen3.8-27b`) via Next.js Route Handler `/api/chat`.
 
-> **Cloudflare Simplicity Constraint**:
-> Cloudflare is kept strictly simple:
-> - DNS management
-> - HTTPS / Full (Strict) SSL
-> - Standard CDN edge caching for static assets
->
-> **Do NOT introduce**: Cloudflare Workers, edge databases, complex WAF rules, or custom edge routing.
+```
+[ USER BROWSER ]
+       │ HTTPS (TLS 1.3)
+       ▼
+[ CLOUDFLARE EDGE ] (weathergpt.app — DNS, Full Strict SSL, HSTS, Static CDN)
+       │ Proxied HTTPS
+       ▼
+[ RENDER WEB SERVICE ] (weathergpt-frontend.onrender.com)
+  └── [ Standalone Docker Container: node:22-alpine (PORT 3000) ]
+       │                                     │
+       ├─► [ Server-Side /api/chat ]         └─► Client-Side Bundles
+       │        │ (HTTPS)                              │ (Direct HTTPS)
+       │        ▼                                      │
+       │   [ Groq Cloud API ]                          ├─► [ AWS AppSync GraphQL ]
+       │   (qwen/qwen3.8-27b)                          │        │
+       │                                               │        ▼
+       └───────────────────────────────────────────────┤   [ Lambda: WeatherFunction ]
+                                                       │        │
+                                                       │        ▼
+                                                       ├─► [ Open-Meteo Weather API ]
+                                                       │
+                                                       └─► [ Supabase PostgreSQL ]
+                                                           (locations & geocoding_cache)
+```
 
 ---
 
-## 2. Cloudflare Configuration & Edge Architecture (Phase 11)
-
-For the complete production edge operational runbook, origin CA setup, and troubleshooting guide, see **[`docs/CLOUDFLARE.md`](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md)**.
-
-1. **DNS & Proxy Management**:
-   - `A` record (`@`) pointing to container origin IP / Render CNAME with `Proxied: Orange Cloud` enabled.
-   - `CNAME` record (`www`) pointing to `@` with `Proxied: Orange Cloud` enabled.
-   - Dynamic `/api/graphql` and `/api/chat` requests pass through directly to the backend.
-2. **SSL/TLS Settings**:
-   - Mode: **Full (Strict)** with Cloudflare Origin CA certificate on origin reverse proxy.
-   - Always Use HTTPS: **Enabled** (redirects HTTP traffic to HTTPS).
-   - Minimum TLS Version: **TLS 1.2** or **TLS 1.3**.
-3. **Edge Security & Cache Headers (configured in `frontend/next.config.ts`)**:
-   - `Strict-Transport-Security`: `max-age=63072000; includeSubDomains; preload`
-   - `X-Content-Type-Options`: `nosniff`
-   - `X-Frame-Options`: `SAMEORIGIN`
-   - `Referrer-Policy`: `strict-origin-when-cross-origin`
-   - `Cache-Control`: Native Next.js immutable chunk caching on `/_next/static/*` (Cloudflare Edge Cache `HIT`)
-   - `Cache-Control`: `no-store, no-cache, must-revalidate` on `/api/*` (Cloudflare Edge Cache `DYNAMIC`)
-
-### 2.1 Verified Live Deployment Endpoints
+## 2. Verified Live Deployment Endpoints
 
 | Tier | Service | URL / Endpoint | Status | SSL / Cache Policy |
 | :--- | :--- | :--- | :--- | :--- |
-| **Edge CDN** | Cloudflare Edge | `https://weathergpt.app` | **Verified Live** | Full (Strict) SSL, HSTS, 1yr immutable static assets |
-| **Origin Host** | Render Web Service | `https://weathergpt-frontend.onrender.com` | **Verified Live** | Multi-stage Docker (`node:22-alpine`), port 3000 |
+| **Edge CDN** | Cloudflare Edge | `https://weathergpt.app` | **Verified Live** | Full (Strict) SSL, HSTS, immutable static assets |
+| **Frontend Host** | Render Web Service | `https://weathergpt-frontend.onrender.com` | **Verified Live** | Multi-stage Docker (`node:22-alpine`), port 3000 |
 | **GraphQL Gateway** | AWS AppSync | `https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql` | **Verified Live** | API Key authenticated, direct Open-Meteo fallback (< 2ms) |
 | **Database** | Supabase Postgres | `https://pwhulhaywzdsggmgweyu.supabase.co` | **Active / Verified** | SSL enforced, RLS on `locations` & `geocoding_cache` |
-| **AI Inference** | Groq Cloud | `https://api.groq.com/openai/v1` (`qwen/qwen3.8-27b`) | **Active / Verified** | Guardrail grounded, token-optimized context |
+| **AI Inference** | Groq Cloud | `https://api.groq.com/openai/v1` (`qwen/qwen3.8-27b`) | **Active / Verified** | Server-side `/api/chat` route, guardrail grounded |
 
 ---
 
 ## 3. Environment Variables Matrix
 
-| Variable | Environment | Destination | Purpose | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `NODE_ENV` | Production / Local | All | Execution mode (`production` / `development`) | Active |
-| `NEXT_PUBLIC_SUPABASE_URL` | Build & Container | Frontend | Public Supabase API gateway URL | **Active in Frontend** |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Build & Container | Frontend | Public safe anon key for RLS-protected queries | **Active in Frontend** |
-| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Build & Container | Frontend | URL of GraphQL endpoint (local `/api/graphql` or future API Gateway) | Active |
-| `NEXT_PUBLIC_MAP_DEFAULT_LAT` | Build & Container | Frontend | Default latitude if geolocation is denied | Active |
-| `NEXT_PUBLIC_MAP_DEFAULT_LON` | Build & Container | Frontend | Default longitude if geolocation is denied | Active |
-| `GROQ_API_KEY` | Container Runtime | Frontend `/api/chat` | API key for LLM Weather Chatbot (Qwen 3.8 27B) | Active |
-| `SUPABASE_URL` | Production / Local | AWS Lambda | Supabase project URL for serverless backend | Configured in IaC |
-| `SUPABASE_SERVICE_ROLE_KEY` | Production / Local | AWS Lambda | Privileged backend secret key (NEVER in frontend) | Configured in IaC |
-| `LLM_API_KEY` | Production / Local | AWS Lambda | API key for weather chatbot (Future Phase 9) | Configured in IaC |
-| `WEATHER_API_KEY` | Production / Local | AWS Lambda | Optional backup provider API key | Configured in IaC |
+### 3.1 Frontend Build-Time Arguments & Client Variables
+
+Injected during Docker image compilation (`Stage 2: builder`) and baked into client JavaScript:
+
+| Variable | Target | Purpose | Example / Current Value |
+| :--- | :--- | :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Frontend Client | Supabase project REST/Auth endpoint | `https://pwhulhaywzdsggmgweyu.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend Client | Safe public anon key for RLS queries | `eyJhbGciOi...` |
+| `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL` | Frontend Client | AWS AppSync managed GraphQL endpoint | `https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql` |
+| `NEXT_PUBLIC_APPSYNC_API_KEY` | Frontend Client | Safe public browser API key for AppSync | `da2-xxxx...` |
+| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Frontend Client | Optional fallback GraphQL endpoint | Defaults to `/api/graphql` |
+| `NEXT_PUBLIC_MAP_DEFAULT_LAT` | Frontend Client | Default latitude if geolocation is denied | `40.7128` |
+| `NEXT_PUBLIC_MAP_DEFAULT_LON` | Frontend Client | Default longitude if geolocation is denied | `-74.0060` |
+
+### 3.2 Frontend Container Runtime Variables (Secrets)
+
+Supplied strictly at container startup (e.g. Render Dashboard Environment Settings):
+
+| Variable | Target | Purpose | Secret? |
+| :--- | :--- | :--- | :--- |
+| `PORT` | Container Runtime | Port on which the standalone server listens (`3000`) | No |
+| `HOSTNAME` | Container Runtime | Interface binding (`0.0.0.0`) | No |
+| `NODE_ENV` | Container Runtime | Runtime environment (`production`) | No |
+| `NEXT_TELEMETRY_DISABLED` | Container Runtime | Disables telemetry reporting (`1`) | No |
+| `GROQ_API_KEY` | Container Runtime (`/api/chat`) | Groq Cloud API key for weather assistant | **YES — Never expose to client** |
+
+### 3.3 Backend AWS SSM Parameters (`/weather-gpt/prod/*`)
+
+Configured in AWS Systems Manager Parameter Store and consumed by Lambda:
+
+| Parameter Name | Target | Purpose | Type |
+| :--- | :--- | :--- | :--- |
+| `/weather-gpt/prod/SUPABASE_URL` | Lambda | Supabase project URL | `String` |
+| `/weather-gpt/prod/SUPABASE_SERVICE_ROLE_KEY` | Lambda | Privileged backend secret key | `SecureString` |
+| `/weather-gpt/prod/WEATHER_API_KEY` | Lambda | Optional backup provider API key | `SecureString` |
 
 ---
 
-## 4. Docker Container Deployment Instructions (Phase 10)
+## 4. End-to-End Production Deployment Walkthrough
 
-### 4.1 Building the Production Container
-Build the standalone image using the multi-stage Dockerfile:
+### Step 1: Database Migration (Supabase)
+Execute migrations in the Supabase Dashboard or CLI:
 ```bash
-docker build -t weathergpt-frontend:latest -f frontend/Dockerfile.frontend frontend
+# Execute SQL migration
+supabase db push
+# Or run supabase/migrations/20260925000000_create_locations_and_geocoding_cache.sql
 ```
-Build arguments for public client-side variables can be supplied if non-default endpoints are required:
+Verify that `locations` and `geocoding_cache` tables have Row Level Security enabled.
+
+### Step 2: AWS AppSync & Lambda Backend Deployment (SAM)
+Deploy the AWS backend stack using the AWS SAM CLI:
 ```bash
-docker build \
-  --build-arg NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co" \
-  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key" \
-  --build-arg NEXT_PUBLIC_GRAPHQL_ENDPOINT="https://your-api.com/graphql" \
-  -t weathergpt-frontend:latest \
-  -f frontend/Dockerfile.frontend frontend
+cd backend
+sam build
+sam deploy --config-env prod
 ```
+Verify the CloudFormation stack `weather-gpt-backend` reaches status `CREATE_COMPLETE` or `UPDATE_COMPLETE` and note the output `GraphQLApiUrl` and `GraphQLApiKey`.
 
-### 4.2 Running the Container in Production
-Launch the standalone container with unprivileged runtime security (`nextjs` UID 1001):
+### Step 3: Frontend Container Deployment on Render Web Service
+1. Connect the GitHub repository `https://github.com/SaM-005X/WeatherGPT` to Render.
+2. Create a new **Web Service** with the following settings:
+   - **Environment**: Docker
+   - **Region**: Oregon (US West) or Ohio (US East)
+   - **Root Directory**: `frontend`
+   - **Dockerfile Path**: `Dockerfile.frontend`
+   - **Docker Context**: `frontend`
+3. Configure **Environment Variables** in Render Dashboard:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL`
+   - `NEXT_PUBLIC_APPSYNC_API_KEY`
+   - `GROQ_API_KEY` (Secret)
+   - `PORT=3000`
+4. Deploy the service and verify it is accessible at:
+   `https://weathergpt-frontend.onrender.com`
+
+### Step 4: Cloudflare Custom Domain & Edge Setup
+Route the custom production domain `weathergpt.app` through Cloudflare:
+1. In Cloudflare DNS, configure:
+   - `CNAME` `@` -> `weathergpt-frontend.onrender.com` (Proxied: Orange Cloud)
+   - `CNAME` `www` -> `weathergpt.app` (Proxied: Orange Cloud)
+2. In Cloudflare SSL/TLS:
+   - Set encryption mode to **Full (Strict)**.
+   - Enable **Always Use HTTPS**.
+   - Enable **HSTS** (max-age 63072000, includeSubDomains, preload).
+3. For detailed edge operational instructions, see [Cloudflare Edge Guide](CLOUDFLARE.md).
+
+---
+
+## 5. Production Health Verification & Smoke Testing
+
+Run the following checks to confirm production health:
+
 ```bash
-docker run -d \
-  --name weathergpt-app \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  -e PORT=3000 \
-  -e HOSTNAME="0.0.0.0" \
-  -e NODE_ENV=production \
-  -e GROQ_API_KEY="your-groq-key" \
-  weathergpt-frontend:latest
-```
+# 1. Verify Edge Domain HTTP/2 and Security Headers
+curl -sI https://weathergpt.app | grep -E "HTTP|server|strict-transport-security|x-frame-options"
 
-### 4.3 Container Health Verification
-Confirm the container is operational and serving all 18 routes and static assets:
-```bash
-# Verify HTTP 200 on root route
-curl -I http://localhost:3000
+# 2. Verify Direct Render Container Origin
+curl -sI https://weathergpt-frontend.onrender.com | grep -E "HTTP|rndr-id"
 
-# Verify static asset chunks
-curl -I http://localhost:3000/_next/static/chunks/...
+# 3. Verify AppSync Managed GraphQL Health
+curl -s -X POST https://64xz24nnqbdktigtxjwstte234.appsync-api.us-east-1.amazonaws.com/graphql \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_APPSYNC_API_KEY" \
+  -d '{"query":"query { weatherByCoordinates(latitude: 40.7128, longitude: -74.0060) { latitude longitude timezone } }"}'
 
-# Check container logs
-docker logs weathergpt-app
+# 4. Verify AI Chatbot Endpoint Health (Server-Side)
+curl -s -X POST https://weathergpt.app/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is the weather?"}' | grep -o "response"
 ```
 
 ---
 
-## 5. Target Production Deployment Sequence
+## 6. Rollback & Operational Update Workflow
 
-1. **Supabase**: Execute migrations (`supabase/migrations/20260925000000_create_locations_and_geocoding_cache.sql`) to set up `locations`, `geocoding_cache`, and RLS policies.
-2. **AWS Lambda / AppSync**: Deploy serverless backend using AWS SAM (`backend/template.yaml`) with secrets configured in AWS SSM Parameter Store (`/weather-gpt/prod/*`).
-3. **Frontend Docker Container**: Build and deploy `weathergpt-frontend:latest` to container host (AWS App Runner, ECS/Fargate, or Docker host) with environment variables configured.
-4. **Cloudflare Edge**: Route custom domain via Cloudflare with Full (Strict) SSL, edge CDN caching, and HSTS enforcement per [`docs/CLOUDFLARE.md`](file:///c:/Users/suman/OneDrive/Desktop/WHETHER_GPT_PROJ/docs/CLOUDFLARE.md).
+### 6.1 Rolling Application Updates
+- Pushes to the `main` branch trigger automated builds on Render.
+- Render builds the standalone Docker container and replaces running instances with zero-downtime rolling updates.
+
+### 6.2 Instant Frontend Rollback
+If a faulty commit causes frontend regressions:
+1. In the **Render Dashboard**, navigate to **Deploys**.
+2. Identify the last known healthy deployment commit.
+3. Click **Rollback to this deploy** to immediately redeploy the previous container artifact without rebuilding.
+
+### 6.3 AppSync / Lambda Backend Rollback
+If a backend deployment introduces regressions:
+```bash
+# Redeploy the previous Git commit using SAM
+git checkout <previous-stable-tag-or-commit>
+cd backend
+sam build
+sam deploy --config-env prod
+```
+Because the Next.js frontend has built-in circuit breaker fallback to direct Open-Meteo services (< 2ms), frontend weather displays will continue functioning even during backend maintenance or transient AWS outages.
+
+---
+
+## 7. Related Documentation
+
+- [Cloudflare Edge](CLOUDFLARE.md) — Edge DNS, Full (Strict) SSL, and CDN caching configuration.
+- [Docker Containerization](DOCKER.md) — Multi-stage build process and standalone container runtime details.
+- [AWS Infrastructure](AWS.md) — AppSync GraphQL API, Lambda resolvers, and EventBridge warming rules.
+- [Supabase Integration](SUPABASE.md) — Database schema, migration, and Row Level Security policies.
+- [System Architecture](ARCHITECTURE.md) — Complete end-to-end production architecture specification.
+- [Troubleshooting Runbook](TROUBLESHOOTING.md) — Diagnostic procedures for common production and local issues.

@@ -6,7 +6,8 @@ WeatherGPT utilizes a secure, multi-stage production Docker container designed a
 
 > **CRITICAL EXECUTION & ARCHITECTURAL CONSTRAINTS**:
 > - Containerization is an **infrastructure milestone** (Phase 10); product features remain strictly separated.
-> - **Kubernetes is strictly prohibited**: Deployment targets single-container runtime runners (e.g. AWS ECS/Fargate, App Runner, or self-hosted Docker host).
+> - **Primary Production Target**: Deployed to **Render Web Service** (`https://weathergpt-frontend.onrender.com`).
+> - **Kubernetes is strictly prohibited**: Deployment targets single-container runtime runners (e.g. Render Web Service, AWS App Runner, or AWS ECS/Fargate).
 > - **Host Development Parity**: Host commands (`npm run dev`, `npm test`, `npm run build`) remain 100% operational on developer machines without requiring Docker.
 
 ---
@@ -23,7 +24,7 @@ WeatherGPT utilizes a secure, multi-stage production Docker container designed a
 [ Stage 2: builder ]
 ├── Base: node:22-alpine
 ├── Ingests: Cached node_modules + application source code
-├── Build Arguments: NEXT_PUBLIC_* variables injected into static bundles
+├── Build Arguments: NEXT_PUBLIC_* variables injected into client bundles
 └── Operation: npm run build (Turbopack standalone compilation)
        │
        ▼ Output Tracing: .next/standalone + .next/static + public
@@ -33,6 +34,19 @@ WeatherGPT utilizes a secure, multi-stage production Docker container designed a
 ├── Artifacts: Standalone node server + static assets + public directory
 └── Entrypoint: ["node", "server.js"] on PORT 3000 (0.0.0.0)
 ```
+
+### Build-Time ARGs vs. Runtime Secrets
+
+It is critical to distinguish between build-time and runtime variables:
+
+1. **Build-Time Arguments (`NEXT_PUBLIC_*`)**:
+   - Injected during `Stage 2: builder` via `ARG` and `ENV`.
+   - Inlined directly into client JavaScript bundles by Next.js during compilation.
+   - Example: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL`, `NEXT_PUBLIC_APPSYNC_API_KEY`.
+2. **Runtime Environment Variables (Server-Side Secrets)**:
+   - Injected **only** at container startup (`docker run -e` or host dashboard).
+   - **NEVER** passed as Docker `ARG` or baked into intermediate image layers.
+   - Example: `GROQ_API_KEY` (consumed strictly server-side by `/api/chat`), `PORT=3000`, `HOSTNAME=0.0.0.0`.
 
 ---
 
@@ -114,19 +128,19 @@ Build context overhead is eliminated by `.dockerignore` filters:
 - **Automated Verification Hygiene**: In CI/CD pipelines and automated agent verification runs, test containers (e.g. `weathergpt-test`) are deliberately stopped (`docker stop`) and removed (`docker rm`) immediately after smoke tests pass. This prevents idle containers from holding TCP ports or silently consuming host system memory and CPU cycles.
 - **Image Persistence**: Stopping or deleting a container instance does **NOT** delete the underlying Docker image. The compiled image `weathergpt-frontend:latest` remains persistently cached inside your local Docker engine and can be re-launched instantly without rebuilding.
 
-### 5.2 How to Start and Run the Container
+### 5.2 How to Start and Run the Container Locally
 
 #### Default Port 3000 Mapping
 When host port `3000` is free:
 ```bash
-docker run -d --name weathergpt -p 3000:3000 weathergpt-frontend:latest
+docker run -d --name weathergpt -p 3000:3000 -e GROQ_API_KEY="gsk_..." weathergpt-frontend:latest
 ```
 - Access application: **`http://localhost:3000`**
 
 #### Alternative Port 3001 Mapping (Host Dev Server Collision Prevention)
 If you already have the Next.js development server running on your host machine (`npm run dev` in `frontend/` on port 3000), host port 3000 will be occupied. To run the production container in parallel without stopping your dev server, map host port 3001 to container port 3000:
 ```bash
-docker run -d --name weathergpt -p 3001:3000 weathergpt-frontend:latest
+docker run -d --name weathergpt -p 3001:3000 -e GROQ_API_KEY="gsk_..." weathergpt-frontend:latest
 ```
 - Access application: **`http://localhost:3001`**
 
@@ -143,13 +157,13 @@ docker run -d --name weathergpt -p 3001:3000 weathergpt-frontend:latest
 | **Remove container (force cleanup)** | `docker rm -f weathergpt` |
 | **Rebuild image after source code changes** | `docker build -t weathergpt-frontend:latest -f frontend/Dockerfile.frontend frontend` |
 
-### 5.4 Docker Architecture & Key Production Benefits
+### 5.4 Verified Build Metrics & Architectural Benefits
 
 1. **Ultra-Lean Standalone Footprint**:
    - Next.js output file tracing isolates only required dependencies into `.next/standalone`.
-   - Compressed Alpine image size is **~64.8 MB** (265 MB uncompressed layer disk usage), eliminating more than 80% of typical full `node_modules` container bloat.
-2. **Sub-Millisecond Cold Starts**:
-   - The standalone Node server boots in **< 1ms** (`✓ Ready in 0ms`, `✓ Running next.config took 1.1ms`), ideal for serverless container platforms (AWS App Runner / ECS).
+   - Measured build output: compressed Alpine layer footprint is **~64.8 MB** (~265 MB uncompressed disk layer usage), eliminating more than 80% of typical full `node_modules` container bloat.
+2. **Rapid Cold Starts**:
+   - In local smoke test verification, the standalone Node server initialized rapidly (`✓ Ready in 0ms`, `✓ Running next.config took 1.1ms`), minimizing cold start times when deployed on container hosting platforms.
 3. **Hardened Unprivileged Security**:
    - Executes under non-root system user `nextjs` (UID 1001) and group `nodejs` (GID 1001).
    - Read-only asset ownership with strict runtime write isolation limited to `.next/`.
@@ -158,7 +172,25 @@ docker run -d --name weathergpt -p 3001:3000 weathergpt-frontend:latest
 
 ---
 
-## 6. Runtime Configuration & Environment Parameters
+## 6. Render Web Service Deployment Flow
+
+WeatherGPT's primary production hosting platform is **Render Web Service**:
+
+1. **Service Type**: Web Service (Docker runtime).
+2. **Repository Settings**:
+   - **Root Directory**: `frontend`
+   - **Dockerfile Path**: `Dockerfile.frontend` (or relative path `./frontend/Dockerfile.frontend` from root)
+   - **Docker Context**: `frontend`
+3. **Environment Variables**:
+   - Configure build arguments (`NEXT_PUBLIC_*`) and runtime secrets (`GROQ_API_KEY`) via the Render Dashboard.
+4. **Health Check Path**: `/` (HTTP 200 OK).
+5. **Production URL**: `https://weathergpt-frontend.onrender.com`.
+
+For step-by-step instructions, see the [Deployment Guide](DEPLOYMENT.md).
+
+---
+
+## 7. Runtime Configuration & Environment Parameters
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -167,6 +199,17 @@ docker run -d --name weathergpt -p 3001:3000 weathergpt-frontend:latest
 | `NODE_ENV` | Container Runtime | `production` | Optimizes React runtime and disables development overhead |
 | `NEXT_TELEMETRY_DISABLED` | Build & Runtime | `1` | Prevents telemetry beaconing to Next.js servers |
 | `NEXT_PUBLIC_SUPABASE_URL` | Build-time ARG | Injected | Supabase project endpoint (embedded in client JS) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`| Build-time ARG | Injected | Safe public anon key for Supabase client |
-| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Build-time ARG | Injected | Target GraphQL API gateway endpoint |
-| `GROQ_API_KEY` | Container Runtime | Optional | Server-side API key for Weather Chatbot LLM route |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Build-time ARG | Injected | Safe public anon key for Supabase client |
+| `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL` | Build-time ARG | Injected | AWS AppSync managed GraphQL production endpoint |
+| `NEXT_PUBLIC_APPSYNC_API_KEY` | Build-time ARG | Injected | Safe public browser API key for AppSync queries |
+| `NEXT_PUBLIC_GRAPHQL_ENDPOINT` | Build-time ARG | Injected | Optional fallback GraphQL endpoint (defaults to `/api/graphql`) |
+| `GROQ_API_KEY` | Container Runtime | Server Secret | Private Groq Cloud API key for Weather Chatbot (`/api/chat`) |
+
+---
+
+## 8. Related Documentation
+
+- [Deployment Guide](DEPLOYMENT.md) — Comprehensive guide for deploying this container to Render with Cloudflare edge integration.
+- [Cloudflare Edge](CLOUDFLARE.md) — Edge DNS, Full (Strict) SSL, and CDN caching configuration in front of the Render container.
+- [System Architecture](ARCHITECTURE.md) — High-level production architecture and container runtime specifications.
+- [Troubleshooting Runbook](TROUBLESHOOTING.md) — Diagnosing container build failures, port binding errors, and missing environment variables.

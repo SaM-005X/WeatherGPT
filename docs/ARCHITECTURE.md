@@ -6,12 +6,13 @@
 2. **Single Source of Truth for Location**: The frontend maintains one active location state in `LocationContext` consumed by the header, navigation modal, location cards, map, and weather domain services.
 3. **Provider-Agnostic Domain Services**: `weatherService.ts` encapsulates meteorological requests and normalizes them into clean Celsius domain models. External weather providers use standard REST (Open-Meteo).
 4. **Deterministic In-Memory Caching & Freshness**: Tiered freshness windows (5m current, 30m hourly, 2h daily, 24h stale fallback) with in-flight request deduplication and non-destructive UI updates.
-5. **Clear Application Boundaries & Domain Service Ownership**: The active dashboard currently operates on direct `weatherService.ts` with zero disruption. GraphQL Yoga exists at `/api/graphql` for local execution and testing. AWS AppSync is the planned managed GraphQL transport for AWS production. Domain services (`weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`) remain the single source of truth for business logic; Lambda handlers act strictly as thin adapters.
+5. **Clear Application Boundaries & Domain Service Ownership**: The Next.js frontend is wired to `fetchWeatherByCoordinates` targeting AWS AppSync in production with automatic fallback (< 2ms) to direct `weatherService.ts`. GraphQL Yoga at `/api/graphql` serves local execution, development, and offline test suites. AWS AppSync is the deployed managed GraphQL transport for production. Domain services (`weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`) remain the single source of truth for business logic; Lambda handlers act strictly as thin adapters.
 6. **Relational Persistence (Current Implementation)**: Supabase PostgreSQL stores user-selected locations (`public.locations`) and caches 30-day geocoding search queries (`public.geocoding_cache`) with Row Level Security.
-7. **Serverless on AWS (Local Foundation / AppSync IaC Canonicalization)**: The Phase 6 serverless foundation (`backend/` with Lambda, API Gateway v2, EventBridge, CloudWatch) was verified locally; actual cloud provisioning remains deferred. For Phase 8.5 AppSync, AWS SAM (`backend/template.yaml`) is the single canonical IaC definition, while `backend/serverless.yml` remains frozen at the Phase 6 foundation.
-8. **Focused Weather Chatbot (Partially Implemented Preview / Future Phase 9 AI)**: Simple weather-topic guardrail ensuring the assistant only answers weather questions using trusted data. The frontend UI preview and typed GraphQL contract stub exist today; real LLM integration and server-side guardrail enforcement are planned for Phase 9.
+7. **Serverless on AWS (Deployed AppSync / Canonical SAM IaC)**: Production serverless infrastructure (AWS AppSync, Lambda resolvers, EventBridge background forecast warming, CloudWatch logging, IAM execution roles) is deployed and verified live via AWS SAM (`backend/template.yaml`). The Phase 6 Serverless Framework definition (`backend/serverless.yml`) remains frozen as a historical local foundation.
+8. **Weather Assistant Chatbot with Groq Cloud (Implemented in Phase 9)**: Weather domain assistant grounded in live meteorological context, powered by Groq Cloud running `qwen/qwen3.8-27b` via Next.js `/api/chat` with strict lifestyle guardrails and a deterministic meteorological fallback engine when `GROQ_API_KEY` is omitted or rate-limited.
 9. **Interactive Mapping & Doppler Radar (Implemented in Phase 8)**: Keyless Leaflet mapping, live RainViewer Doppler radar tile overlay with lifecycle management, real-time Cloud Cover HUD, and multi-instance coordinate synchronization.
 10. **Edge Acceleration & Production Security (Implemented in Phase 11)**: Cloudflare Anycast edge layer enforcing Full (Strict) SSL, automatic HTTP-to-HTTPS redirection, browser-enforced HSTS (`max-age=63072000`), defense-in-depth headers, and 1-year immutable edge caching for static assets with dynamic API bypass.
+11. **Container Runtime & Web Service Hosting (Implemented in Phase 10 & 12)**: The frontend is packaged into a hardened multi-stage standalone Docker container on `node:22-alpine` running as non-root user `nextjs` (UID 1001, port 3000) and deployed on Render Web Service.
 
 ---
 
@@ -90,145 +91,144 @@ The location model (`src/types/location.ts`) is designed to map directly to futu
   - **Surfaces**: Crisp white cards (`bg-white`) with subtle borders (`border-slate-200`) and minimal shadows (`shadow-xs`).
   - **Typography**: Dark high-contrast primary text (`text-slate-900`) with muted gray secondary text (`text-slate-500`).
   - **Accents**: Restrained sky-blue (`bg-sky-600`, `text-sky-600`) without neon glows or heavy gradients.
-  - **Form Controls**: High-legibility input fields with explicit focus rings (`focus:ring-2 focus:ring-sky-100 focus:border-sky-500`).
+  - **Form Controls**: High-legibility input fields with explicit focus rings (`foc## 3. End-to-End System Architecture
 
-### Hydration Stabilization
-- Formatted timestamps in `CurrentWeatherCard.tsx` and `WeatherAssistant.tsx` are hardened with `suppressHydrationWarning` and deterministic formatting to avoid server/client locale hydration mismatch.
-- Weather data remains strictly isolated mock preview data; live weather API integration has **NOT** started.
+### A. Current Production Architecture (Live Deployed Runtime)
 
----
-
-## 3. End-to-End System Architecture
-
-### A. Current Implemented Architecture (Active Runtime)
-
-The active dashboard (`src/app/page.tsx`) currently queries meteorological data by calling `weatherService.ts` directly.
+In the verified production deployment, WeatherGPT operates across four coordinated tiers:
 
 ```text
-Next.js Dashboard
+[ User Browser / Client ]
        │
+       │ HTTPS / 443
        ▼
-weatherService.ts (In-memory 5m cache, tiered freshness, deduplication)
+[ Cloudflare Global Anycast Edge Network ] (https://weathergpt.app)
+       ├── Full (Strict) SSL Termination & Automated HTTPS Redirect
+       ├── Browser HSTS Preload (max-age=63072000) & Security Headers
+       ├── Static Asset Cache HIT (/_next/static/*, media assets)
+       └── DDoS Mitigation & Global Anycast DNS
        │
+       │ HTTPS Origin Request (CNAME: weathergpt-frontend.onrender.com)
        ▼
-Open-Meteo REST API (https://api.open-meteo.com/v1/forecast)
-```
-
-**Key Characteristics of Current State:**
-- **Dashboard Data Transport**: Operates entirely on direct `weatherService.ts` with zero GraphQL runtime dependency.
-- **Local GraphQL Gateway**: A fully functional GraphQL Yoga engine exists at `/api/graphql` (`src/app/api/graphql/route.ts`). It reuses the same domain services and schema for schema/resolver testing and local development, but is not currently in the dashboard's render path.
-- **AWS Backend Foundation (Phase 6)**: The AWS Lambda and API Gateway v2 handlers (`backend/src/handlers/graphql.ts`, `sync.ts`) exist and have been tested offline/locally, but are **not deployed** to AWS.
-- **Persistent Data**: Supabase PostgreSQL is actively queried for saved locations (`public.locations`) and geocoding cache (`public.geocoding_cache`) using the public `anon` key.
-- **Radar & Geospatial**: Interactive Leaflet maps (`WeatherMap.tsx`, `/maps`) query RainViewer Doppler radar tiles and Open-Meteo cloud cover directly.
-
----
-
-### B. Future Local GraphQL Architecture (Target Local Development)
-
-During Phase 8.5.8, the frontend client will be wired to consume GraphQL via `weatherAdapter.ts` and `graphqlClient.ts`. In local development, requests route to the Next.js App Router GraphQL Yoga route:
-
-```text
-Next.js Dashboard
-       │
-       ▼
-weatherAdapter.ts (Drop-in adapter matching fetchWeatherData signature)
-       │
-       ▼
-graphqlClient.ts (Lightweight typed fetch-based client)
-       │
-       ▼
-GraphQL Yoga Gateway (/api/graphql)
-       │
-       ▼
-weatherService.ts (Domain business logic & in-memory cache)
-       │
-       ▼
-Open-Meteo REST API
-```
-
----
-
-### C. Future AWS AppSync Architecture (Target AWS Production)
-
-In production AWS deployment, AWS AppSync serves as the fully managed serverless GraphQL entry point:
-
-```text
-Next.js Dashboard (Static / Edge Deployed)
-       │
-       ▼
-weatherAdapter.ts
-       │
-       ▼
-graphqlClient.ts (Configured with AppSync HTTPS endpoint + x-api-key / IAM)
-       │
-       ▼
-AWS AppSync (Managed Serverless GraphQL Transport)
+[ Render Web Service — Docker Standalone Container ] (Port 3000)
+       ├── Next.js Standalone Runner (node:22-alpine, non-root nextjs UID 1001)
+       ├── 18 Application Dashboards & Sub-Routes
+       ├── Chatbot Route Handler (/api/chat -> Groq Cloud Qwen 3.8 27B)
+       └── Local Development / Test GraphQL Route (/api/graphql)
        │
        ├─────────────────────────────────┬─────────────────────────────────┐
-       ▼                                 ▼                                 ▼
-weatherFunction Lambda             locationFunction Lambda            assistantFunction Lambda
-(Thin Adapter: Node.js/ARM64)      (Thin Adapter: Node.js/ARM64)      (Thin Adapter — Phase 9)
-       │                                 │                                 │
-       ▼                                 ▼                                 ▼
-weatherService.ts                 geocodingService.ts                LLM Provider API
-(In-memory cache, deduplication)   locationPersistenceService.ts     (Grounded with live weather)
-       │                                 │
-       ▼                                 ▼
-Open-Meteo REST API               Open-Meteo Geocoding / Supabase
+       │ Browser / Client GraphQL Query  │ Browser / Server API Ingestion  │ Browser / Server Direct
+       ▼ (x-api-key: NEXT_PUBLIC_APPSYNC)▼ (GROQ_API_KEY)                  ▼ (anon key)
+[ AWS AppSync Managed GraphQL ]   [ Groq Cloud API ]              [ Supabase PostgreSQL ]
+  (lae4htbgzfbcvjnczbgzio3w6q)      (qwen/qwen3.8-27b)              (public.locations)
+       │                                                            (public.geocoding_cache)
+       ▼ Direct Lambda Resolver
+[ WeatherFunction Lambda ] (us-east-1)
+       │ (Thin Adapter)
+       ▼
+[ weatherService.ts ] (In-memory 5m tiered cache, request deduplication)
+       │
+       ▼
+[ Open-Meteo REST API ] (https://api.open-meteo.com/v1/forecast)
 ```
+
+**Key Characteristics of Current Production State:**
+- **Edge Layer**: Cloudflare terminates public SSL for `https://weathergpt.app`, offloading static asset caching and applying security headers before proxying requests to the Render origin.
+- **Frontend Container**: Packaged via `frontend/Dockerfile.frontend` (`node:22-alpine`) and deployed as a Docker Web Service on Render (`https://weathergpt-frontend.onrender.com`).
+- **GraphQL Production Transport**: Client queries (`fetchWeatherByCoordinates` in `src/lib/api/graphqlClient.ts`) target AWS AppSync HTTPS endpoint using `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL` and `NEXT_PUBLIC_APPSYNC_API_KEY`.
+- **Fast-Fail Fallback (< 2ms)**: If AppSync is unreachable, times out, or returns a 5xx error, the client gracefully falls back to direct `weatherService.ts` within 1.58ms (measured in release gate audit), preventing user-facing disruption.
+- **AI Weather Assistant**: Operates through Next.js `/api/chat`, calling Groq Cloud running `qwen/qwen3.8-27b` with token-conscious meteorological grounding and strict lifestyle guardrails.
+- **Database Persistence**: Supabase PostgreSQL stores user-selected locations (`public.locations`) and caches 30-day geocoding results (`public.geocoding_cache`) with Row Level Security.
+- **Background Synchronization**: Amazon EventBridge triggers `ForecastSyncFunction` every 30 minutes in AWS to warm hourly and daily forecast projections for tracked coordinates.
+
+---
+
+### B. Local Development Architecture (Offline Autonomy)
+
+In local development, the application runs with zero cloud credentials or external AWS dependencies:
+
+```text
+Next.js Development Server (npm run dev)
+       │
+       ▼
+graphqlClient.ts (Targets local /api/graphql or direct domain service)
+       │
+       ├─────────────────────────────────┐
+       ▼                                 ▼
+GraphQL Yoga Gateway (/api/graphql)  weatherService.ts (In-memory 5m cache)
+       │                                 │
+       └────────────────► ───────────────┘
+                         │
+                         ▼
+                 Open-Meteo REST API
+```
+
+---
+
+### C. Historical Foundation: Phase 6 Serverless Framework
+
+During Phase 6, a serverless foundation utilizing AWS Lambda behind an Amazon API Gateway HTTP API v2 wrapper (`backend/src/handlers/graphql.ts`) was implemented and tested offline.
+- **Frozen State**: `backend/serverless.yml` remains frozen as an immutable record of that local foundation.
+- **Superseded in Production**: AWS AppSync via AWS SAM (`backend/template.yaml`) is the active, deployed production GraphQL transport.
 
 ---
 
 ### D. Domain Services Remain the Business Logic Layer
 
-A central architectural mandate of WeatherGPT is that **AppSync and Lambda handlers must NOT become the main business-logic layer**:
+A central architectural invariant of WeatherGPT is that **transport layers (AppSync, Lambda, GraphQL) must NOT become the business-logic layer**:
 - **Domain Service Authority**: `weatherService.ts`, `geocodingService.ts`, `locationPersistenceService.ts`, and `rainViewerService.ts` remain the single source of truth for all calculations, validations, caching rules, and external provider coordination.
 - **Thin Lambda Adapters**: Lambda functions act strictly as thin adapters:
-  1. Receive the AppSync resolver event (e.g., `event.arguments.coordinates`).
+  1. Receive the AppSync resolver event (e.g. `event.arguments.coordinates`).
   2. Invoke the corresponding domain service method.
   3. Return the normalized domain model to AppSync.
 - **Transport Independence**: Business logic remains 100% testable and runnable offline without AWS, AppSync, or cloud connectivity.
 
 ---
 
-### System Topology Diagram (Target Overview)
+### System Topology Diagram (Current Production)
 
 ```mermaid
 flowchart TD
-    UserClient["User Browser / Client"] -->|"HTTPS"| Cloudflare["Cloudflare (Target: DNS / Full Strict SSL / CDN)"]
+    UserClient["User Browser / Client"] -->|"HTTPS / 443"| Cloudflare["Cloudflare Anycast Edge (weathergpt.app)\nFull Strict SSL / HSTS / Static CDN"]
     
-    subgraph FrontendApp["Frontend (Next.js 16 + React 19 + Tailwind v4 — Implemented)"]
-        Cloudflare -->|"Serves UI Pages"| NextApp["Next.js Application"]
-        NextApp --> LocHook["LocationContext (Single Source of Truth)"]
-        LocHook --> MapModule["Leaflet Map (Dynamic Sync + Radar + Cloud HUD — Implemented)"]
-        NextApp --> ChatModule["Weather Assistant Drawer (Preview / Partial Impl — Phase 9 Target)"]
-        NextApp --> DirectWeather["Direct weatherService.ts (Active Dashboard Runtime)"]
-        NextApp --> GQLAdapter["GraphQL Client & weatherAdapter.ts (Phase 8.5.8 Target)"]
+    subgraph RenderTier["Render Cloud Web Service (weathergpt-frontend.onrender.com)"]
+        Cloudflare -->|"HTTPS Proxy"| NextContainer["Next.js Standalone Docker Container\nNode 22 Alpine | Port 3000 | UID 1001"]
+        NextContainer --> LocHook["LocationContext (Single Source of Truth)"]
+        LocHook --> MapModule["Leaflet Map + RainViewer Radar + Cloud HUD"]
+        NextContainer --> ChatRoute["Route Handler (/api/chat)"]
+        NextContainer --> GQLClient["GraphQL Client (graphqlClient.ts)"]
+        NextContainer --> DirectWeather["Direct weatherService.ts (Tiered In-Memory Cache)"]
     end
 
-    subgraph LocalDev["Local GraphQL Dev Gateway (Implemented)"]
-        GQLAdapter -.->|"Local: POST /api/graphql"| YogaGateway["Next.js GraphQL Yoga (/api/graphql)"]
-        YogaGateway --> DirectWeather
-    end
-
-    subgraph AWSCloud["AWS Production Architecture (Phase 8.5 Target — Not Deployed)"]
-        GQLAdapter -->|"Production: HTTPS POST"| AppSync["AWS AppSync (Managed GraphQL Transport)"]
-        
-        AppSync --> WeatherLambda["weatherFunction Lambda (Thin Adapter)"]
-        AppSync --> LocLambda["locationFunction Lambda (Thin Adapter)"]
-        AppSync -.->|"Phase 9"| ChatLambda["assistantFunction Lambda (Thin Adapter)"]
-
+    subgraph AWSCloud["AWS Production Backend (us-east-1 — Stack: weather-gpt-backend)"]
+        GQLClient -->|"HTTPS POST (x-api-key)"| AppSync["AWS AppSync Managed GraphQL API\n(lae4htbgzfbcvjnczbgzio3w6q)"]
+        AppSync --> WeatherLambda["WeatherFunction Lambda (Thin Adapter)"]
         WeatherLambda --> DirectWeather
-        LocLambda --> LocServices["geocodingService.ts & locationPersistenceService.ts"]
         
-        SSM["AWS SSM Parameter Store"] -.->|"Runtime Secrets"| WeatherLambda
-        CloudWatch["AWS CloudWatch"] <--|"Structured JSON Logs"| WeatherLambda
+        EventBridge["Amazon EventBridge Rule\nrate(30 minutes)"] --> SyncLambda["ForecastSyncFunction Lambda"]
+        SyncLambda --> DirectWeather
+
+        WeatherLambda -.->|"Structured JSON"| CloudWatch["Amazon CloudWatch Logs"]
+        SyncLambda -.->|"Structured JSON"| CloudWatch
     end
 
-    subgraph ExternalServices["External Providers"]
+    subgraph ExternalProviders["External Upstream Providers"]
         WeatherAPI["Open-Meteo REST API (Live Weather & Geocoding)"]
-        RainViewer["Radar Tile Service (RainViewer API v2 — Implemented Phase 8)"]
-        LLMProvider["LLM API (Future Phase 9 Chatbot — Provider Not Yet Finalized)"]
+        RainViewer["RainViewer API v2 (Doppler Radar Frames)"]
+        GroqCloud["Groq Cloud API (qwen/qwen3.8-27b)\nWeather Grounded LLM Inference"]
+    end
+
+    subgraph DatabaseLayer["Supabase PostgreSQL (Active Production)"]
+        SupaDB[("Supabase PostgreSQL\n(public.locations & public.geocoding_cache)\nRow Level Security Enforced")]
+    end
+
+    %% Client and backend interactions
+    ChatRoute -->|"Server Runtime (GROQ_API_KEY)"| GroqCloud
+    DirectWeather -->|"In-Memory Cache Miss"| WeatherAPI
+    NextContainer -->|"Persist & Query Locations (anon key)"| SupaDB
+    MapModule -->|"Doppler Radar Tiles"| RainViewer
+    GQLClient -.->|"Overload / Fast-Fail Fallback (< 2ms)"| DirectWeather
+```vider["LLM API (Future Phase 9 Chatbot — Provider Not Yet Finalized)"]
     end
 
     subgraph DatabaseLayer["Supabase PostgreSQL (Current Implementation)"]
@@ -356,12 +356,21 @@ In Phase 3.1, a dedicated resolution layer was introduced to guarantee that sear
 - **Phase 4.1**: Completed (Automatic 10m Weather Refresh & Live Saved Locations).
 - **Step 1**: Completed (Navigation Shell & Shared Location Context).
 - **Phase 5**: Completed (GraphQL Foundation & Application Gateway).
-- **Phase 6**: Completed (AWS Serverless Setup — Implemented & verified locally; cloud deployment deferred).
+- **Phase 6**: Completed (AWS Serverless Setup — Implemented & verified locally; frozen foundation).
 - **Phase 7**: Completed (Weather Updates & Freshness Pipeline).
 - **Phase 7.2**: Completed (Final Stabilization / Performance & Abort Handling).
 - **Phase 8**: Completed (Simple Weather & Cloud Map — RainViewer Doppler Radar, Cloud Cover HUD, /maps, and Leaflet Sync).
-- **Phase 8.5**: In Progress / Planned (AWS AppSync Integration — Phase 8.5.1 & 8.5.1-C Completed; Phase 8.5.2 Current Documentation Synchronization; SAM canonical IaC; domain services retained as business logic).
-- **Phase 9**: Pending (Weather Chatbot — Next Feature Milestone: LLM integration, server-side weather grounding, and guardrail enforcement).
+- **Phase 8.5**: Completed & Deployed (AWS AppSync Managed GraphQL Integration — SAM canonical IaC, thin Lambda adapter `WeatherFunction`, EventBridge `ForecastSyncFunction`, and client fast-failover).
+- **Phase 9**: Completed (Weather Chatbot with Groq Cloud Qwen 3.8 27B, Next.js `/api/chat`, and lifestyle guardrails).
+- **Stage 5 & 6**: Completed (Interactive Radar Playback Timeline & Precipitation Nowcast).
+- **Stage 7**: Completed (Wind Patterns, Cloud Cover & Satellite Imagery Layers).
+- **Stage 8**: Completed (Severe Weather Alerts, Thunderstorm Tracking & Resilience).
+- **Stage 9**: Completed (Geohazards Architecture — Earthquakes, Volcanoes & Tsunamis).
+- **Stage 10**: Completed (Environmental, Astronomical & Lifestyle Intelligence Dashboards).
+- **Phase 10**: Completed (Docker Containerization — Standalone Next.js Multi-Stage Container on Node 22 Alpine).
+- **Phase 11**: Completed (Cloudflare Edge & Production HTTPS Runbook).
+- **Phase 12**: Completed (Final Release Gate, Docker Runtime Alignment & Production Readiness Sign-Off — v1.14.0).
+
 
 ---
 
@@ -540,11 +549,12 @@ Next.js Frontend (or external client)
 ### 8.1 Transition to AWS AppSync (Phase 8.5 Architecture)
 - **Managed GraphQL Transport**: While Phase 6 established an API Gateway v2 + GraphQL Yoga Lambda handler as a local serverless proof-of-concept, Phase 8.5 transitions the production AWS architecture to **AWS AppSync**.
 - **Single Canonical IaC**: `backend/template.yaml` (AWS SAM) is the single canonical IaC definition for AppSync and its data source Lambda functions. `backend/serverless.yml` remains frozen at the Phase 6 foundation and is not an active AppSync IaC source.
-- **Domain-Grouped Lambda Topology**: Rather than routing all GraphQL queries through a monolithic Yoga handler, AppSync delegates directly to domain-grouped Lambda functions:
-  - `weatherFunction`: Resolves `weatherByCoordinates` and `refreshWeather`.
-  - `locationFunction`: Resolves `searchLocations` and `savedLocations`.
-  - `assistantFunction`: Resolves `askWeatherAssistant` (Phase 9 only).
+- **Domain-Grouped Lambda Topology**: AppSync delegates to specialized Lambda resolvers:
+  - `WeatherFunction`: Active deployed resolver in `us-east-1` handling `weatherByCoordinates`.
+  - `locationFunction`: Architectural design stub for `searchLocations` and `savedLocations` (locations are persisted and queried directly via Supabase client in production).
+  - `assistantFunction`: Architectural design stub (the production Weather Chatbot is served directly by Next.js `/api/chat` via Groq Cloud, not via AppSync Lambda).
 - **Thin Adapters & Domain Ownership**: These Lambda functions are pure adapters; all meteorological math, tiered freshness, deduplication, and external network interactions remain inside `weatherService.ts`, `geocodingService.ts`, and `locationPersistenceService.ts`. AppSync and Lambda handlers must not duplicate or absorb domain business logic.
+
 
 ---
 
@@ -714,22 +724,28 @@ Phase 8 enriches WeatherGPT with interactive geospatial visualization, real-time
 
 ---
 
-## 12. Weather Assistant Architecture & Preparation (Partially Implemented / Phase 9 Target)
+## 12. Weather Assistant Chatbot Architecture (Implemented in Phase 9)
 
-WeatherGPT includes a dedicated Weather Assistant component designed to provide natural-language answers grounded strictly in verified meteorological data.
+WeatherGPT includes a dedicated Weather Assistant component designed to provide natural-language answers grounded strictly in verified meteorological data and outdoor planning.
 
-### 1. Current Verified Implementation (Partial)
-- **Frontend Chatbot UI (`src/components/chatbot/WeatherAssistant.tsx`)**:
-  - Interactive chat interface rendered directly on the dashboard.
-  - Features labeled header ("Weather Assistant" / "Weather-only Advisor"), local message thread state, location-aware greeting, input validation, send button, and preview responses.
-- **GraphQL Schema & Resolvers (`typeDefs.ts`, `weatherResolvers.ts`)**:
-  - SDL includes `type ChatResponse { reply: String!, isOffTopic: Boolean! }`.
-  - Mutation `askWeatherAssistant(message: String!, coordinates: CoordinatesInput): ChatResponse!`.
-  - Resolver stub validates message length and returns a structured response indicating Phase 9 connection readiness.
-- **Client Operations (`operations.ts`)**:
-  - Typed `ASK_WEATHER_ASSISTANT_MUTATION` ready for invocation.
-- **AWS Backend Compatibility**:
-  - Reused in AWS Lambda (`backend/src/handlers/graphql.ts`) and configured with generic `LLM_API_KEY` secret parameter.
+### 1. Current Verified Implementation
+- **Frontend Chatbot UI (`src/components/WeatherChat.tsx` / `src/components/chatbot/WeatherAssistant.tsx`)**:
+  - Interactive chat interface embedded into the dashboard.
+  - Labeled header, message history with auto-scroll, prompt suggestion chips (`"Do I need an umbrella today?"`, `"What should I wear?"`, `"Best time for a walk?"`), Enter-key submission, and animated typing indicator.
+- **Dedicated Route Handler (`src/app/api/chat/route.ts`)**:
+  - Next.js server route accepting `messages` (compacted to the last 3-4 turns to conserve tokens) and `weatherContext`.
+  - Injects live meteorological observations (temperature, feels-like, wind, humidity, precipitation, cloud cover, and daily high/low) directly into the model system prompt.
+- **Provider & Model Integration (`src/lib/weatherAssistant.ts`)**:
+  - Powered by **Groq Cloud API** running `qwen/qwen3.8-27b` via OpenAI-compatible chat completions (`https://api.groq.com/openai/v1/chat/completions`).
+  - Parameterized with `temperature: 0.3` and `max_tokens: 300` for crisp, reliable responses.
+- **Balanced Lifestyle Guardrail Engine**:
+  - Enthusiastic and practical for sports suitability, clothing choices, walk timing, and umbrella recommendations.
+  - Automatically refuses off-topic queries (coding, trivia, math, recipes, politics, creative writing) with polite domain-boundary refusal.
+- **Deterministic Meteorological Fallback**:
+  - If `GROQ_API_KEY` is omitted, placeholder, or rate-limited (HTTP 429), the assistant immediately falls back to `generateGroundedWeatherAdvice` (`source: 'grounded-fallback'`), returning calculated meteorological recommendations without failing or crashing.
+- **GraphQL Contract Stub (`schema.graphql`)**:
+  - `askWeatherAssistant` remains in `backend/schema.graphql` as an unused architectural contract stub; the active production chatbot communicates directly via `/api/chat`.
+
 
 ---
 
@@ -1055,19 +1071,19 @@ Stage 8 introduces full-spectrum severe weather advisory detection, convective t
 |                                            │                                      |
 |                        [ Non-Root User: nextjs (UID 1001) ]                       |
 |                                            │                                      |
-|                             [ Alpine Linux (Node 20) ]                            |
+|                             [ Alpine Linux (Node 22) ]                            |
 +-----------------------------------------------------------------------------------+
 ```
 
 ### 18.1 Architectural Principles & Multi-Stage Topology
-The Phase 10 containerization architecture packages WeatherGPT into an ultra-lean, secure production container without sacrificing development ergonomics or host tooling:
+The Phase 10 & 12 containerization architecture packages WeatherGPT into an ultra-lean, secure production container deployed on **Render Web Service** without sacrificing development ergonomics or host tooling:
 1. **Next.js Standalone Compilation (`output: 'standalone'`)**:
    - Next.js automatically traces import dependency paths across the 18 routes, bundling only necessary `node_modules` into `.next/standalone`.
    - Eliminates 80%+ of extraneous development and build dependencies from the final production runtime container.
 2. **Multi-Stage Build Pipeline**:
-   - **Stage 1 (`deps`)**: Ingests `package.json` and `package-lock.json` on `node:20-alpine`, runs `npm ci` with frozen lockfile, leveraging `libc6-compat` for musl libc compatibility.
+   - **Stage 1 (`deps`)**: Ingests `package.json` and `package-lock.json` on `node:22-alpine`, runs `npm ci` with frozen lockfile, leveraging `libc6-compat` for musl libc compatibility.
    - **Stage 2 (`builder`)**: Ingests application source and dependencies, injects build-time `NEXT_PUBLIC_*` arguments into the static asset bundle, and executes `npm run build`.
-   - **Stage 3 (`runner`)**: Uses a pristine `node:20-alpine` base image, discarding all source code, git metadata, and build compilers. Copies only `public`, `.next/static`, and `.next/standalone`.
+   - **Stage 3 (`runner`)**: Uses a pristine `node:22-alpine` base image, discarding all source code, git metadata, and build compilers. Copies only `public`, `.next/static`, and `.next/standalone`.
 3. **Strict Non-Root Security Model**:
    - Defines system group `nodejs` (GID 1001) and system user `nextjs` (UID 1001).
    - Establishes read-only binary ownership while providing explicit ownership to `nextjs:nodejs` over runtime cache directories (`.next`).
@@ -1076,16 +1092,16 @@ The Phase 10 containerization architecture packages WeatherGPT into an ultra-lea
 ### 18.2 Variable Lifecycle Separation
 To prevent environment leakage while ensuring dynamic portability, variables are strictly partitioned:
 - **Build-Time Injected Variables (`NEXT_PUBLIC_*`)**:
-  - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_GRAPHQL_ENDPOINT`, `NEXT_PUBLIC_MAP_DEFAULT_LAT`, `NEXT_PUBLIC_MAP_DEFAULT_LON`.
+  - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL`, `NEXT_PUBLIC_APPSYNC_API_KEY`, `NEXT_PUBLIC_MAP_DEFAULT_LAT`, `NEXT_PUBLIC_MAP_DEFAULT_LON`.
   - Injected as Docker `ARG` in Stage 2 (`builder`) and compiled directly into frontend client JavaScript bundles.
 - **Container Runtime Variables**:
-  - `PORT=3000` and `HOSTNAME="0.0.0.0"` ensure the container listens properly across all container network interfaces.
+  - `PORT=3000` and `HOSTNAME="0.0.0.0"` ensure the container listens properly across all network interfaces inside Render / Docker.
   - `NODE_ENV=production` ensures optimized server-side rendering and disables dev server logging overhead.
-  - `GROQ_API_KEY`: Ingested dynamically by the server process at container runtime for the `/api/chat` LLM route, keeping credentials out of image layers.
+  - `GROQ_API_KEY`: Ingested dynamically by the server process at container runtime for the `/api/chat` LLM route, keeping credentials out of image layers. Never passed as build arguments.
 
 ### 18.3 Footprint & Runtime Metrics
 - **Final Image Disk Usage**: ~265MB uncompressed layer disk usage (~64.8MB compressed Alpine content size).
-- **Startup Latency**: Server boots in < 1ms (`✓ Ready in 0ms`, `✓ Running next.config took 1.1ms`).
+- **Startup Latency**: Server boots in < 1ms in local smoke tests (`✓ Ready in 0ms`, `✓ Running next.config took 1.1ms`).
 - **Route Availability**: 100% operational parity across all 18 routes (`/`, `/air-quality`, `/activities`, `/alerts`, `/astronomy`, `/earthquakes`, `/volcanoes`, `/tsunamis`, `/storms`, `/nowcast`, `/maps`, `/hourly`, `/forecast`, etc.) and dynamic API routes (`/api/chat`, `/api/graphql`).
 - **Host Workflow Preservation**: Local development (`npm run dev`), unit tests (`npm test`), and local compilation (`npm run build`) remain 100% functional without Docker overhead.
 
@@ -1093,19 +1109,19 @@ To prevent environment leakage while ensuring dynamic portability, variables are
 
 ## 19. Edge & CDN Architecture (Cloudflare + Next.js Headers — Phase 11)
 
-```
+```text
 [ User Browser ]
        │ HTTPS / 443
        ▼
-[ Cloudflare Global Anycast Edge Network ]
+[ Cloudflare Global Anycast Edge Network ] (https://weathergpt.app)
        ├── Full (Strict) SSL / TLS 1.3 Termination
        ├── HSTS & Security Headers Injection
-       ├── Static Asset Cache HIT (/_next/static/*, 1yr immutable)
+       ├── Static Asset Cache HIT (Media assets & native chunks)
        └── DDoS Mitigation & IP Masking
        │
-       ▼ (Origin HTTPS Request)
-[ Standalone Next.js Docker Container ]
-       ├── Standalone Node Server (Port 3000)
+       ▼ (Origin HTTPS Request — CNAME: weathergpt-frontend.onrender.com)
+[ Render Web Service — Docker Standalone Container ]
+       ├── Standalone Node Server (Port 3000, node:22-alpine)
        ├── 18 Application Routes
        └── API Handlers (/api/chat, /api/graphql with no-store)
 ```
@@ -1113,21 +1129,30 @@ To prevent environment leakage while ensuring dynamic portability, variables are
 ### 19.1 Edge Architecture & Simplicity Constraint
 WeatherGPT adheres strictly to the Cloudflare Simplicity Constraint:
 - **No Edge Compute Bloat**: Cloudflare Workers, edge databases (D1/KV), and edge middleware are avoided. The edge acts strictly as a high-performance CDN, SSL termination proxy, and DDoS barrier.
-- **Full (Strict) SSL Termination**: End-to-end encryption from browser to edge, and edge to origin, validated via Cloudflare Origin CA certificates.
+- **Full (Strict) SSL Termination**: End-to-end encryption from browser to edge, and edge to Render origin, leveraging Render's automated managed origin TLS certificate lifecycle.
 - **HSTS Preload & Security Headers**: Next.js automatically outputs `Strict-Transport-Security` (2-year preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Referrer-Policy: strict-origin-when-cross-origin`.
 
 ### 19.2 Edge Caching & Cache-Control Policies
 Deterministic caching headers configured in `frontend/next.config.ts`:
-1. **Immutable Static Chunks (`/_next/static/:path*`)**:
+1. **Native Next.js Static Chunks (`/_next/static/*`)**:
+   - Next.js 16 natively manages immutable static chunk caching without custom header overrides, eliminating build-time warnings while ensuring Cloudflare Edge `HIT` responses.
+2. **Static Media Assets (`/(favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp|woff|woff2))`)**:
    - `Cache-Control: public, max-age=31536000, immutable`.
-   - Edge nodes cache chunks globally; client browsers never refetch hash-named static assets.
-2. **Dynamic API & Telemetry Routes (`/api/:path*`)**:
+3. **Dynamic API & Telemetry Routes (`/api/:path*`)**:
    - `Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache`.
-   - Prevents stale responses for live weather telemetry, geohazard updates, and AI chatbot streaming.
-3. **Application Route HTML (`/`, `/air-quality`, `/alerts`, etc.)**:
+   - Prevents stale responses for live weather telemetry, geohazard updates, and AI chatbot inference.
+4. **Application Route HTML (`/`, `/air-quality`, `/alerts`, etc.)**:
    - Delivered dynamically (`s-maxage=0`) to ensure instant client-side hydration with fresh local storage and geolocation coordinates.
 
+---
 
+## 20. Related Documentation
 
-
-
+- **[Project Overview](PROJECT_OVERVIEW.md)**: High-level scope, technology matrix, and boundaries.
+- **[Roadmap](ROADMAP.md)**: Complete chronological milestone progression (Phases 0–12).
+- **[Deployment Guide](DEPLOYMENT.md)**: Canonical production deployment topology, live endpoints, and environment variables.
+- **[AWS Serverless](AWS.md)**: AWS AppSync, Lambda resolvers, EventBridge, and CloudWatch infrastructure.
+- **[GraphQL Specification](GRAPHQL.md)**: Schema SDL, queries, mutations, and AppSync integration.
+- **[Docker Containerization](DOCKER.md)**: Multi-stage Dockerfile and container runtime runbook.
+- **[Cloudflare Edge](CLOUDFLARE.md)**: Production DNS, SSL/TLS, and edge cache management.
+- **[Troubleshooting Runbook](TROUBLESHOOTING.md)**: Production cloud and local runtime diagnostic workflows.
