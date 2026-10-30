@@ -744,7 +744,7 @@ The engineering roadmap for WeatherGPT was executed systematically across 12 cor
 
 ## 👨‍💻 Author & Acknowledgments
 
-- **Lead Engineer & Cloud Architect**: **Samrat Ghosh** ([@SaM-005X](https://github.com/SaM-005X))
+- **Lead Engineer & Cloud Architect**: **Samrat Sengupta** ([@SaM-005X](https://github.com/SaM-005X))
 - **Live Portfolio**: [https://samratdev.fun](https://samratdev.fun)
 - **Organization / Internship**: **Workmates Core2Cloud**
 - **License**: MIT License &bull; Free and Open Source
